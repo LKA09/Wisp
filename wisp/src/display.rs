@@ -1,317 +1,50 @@
-use std::env;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::Write;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread;
+use std::time::Duration;
 
-const DEFAULT_WIDTH: usize = 72;
-const MIN_WIDTH: usize = 24;
-const INDENT: &str = "  ";
+// ─── ANSI helpers ─────────────────────────────────────────────────────────────
 
-const RST: &str = "\x1b[0m";
+const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
-const CYAN: &str = "\x1b[96m";
-const YLW: &str = "\x1b[93m";
-const GRN: &str = "\x1b[92m";
-const RED: &str = "\x1b[91m";
-const MAG: &str = "\x1b[95m";
+/// Soft lavender — primary brand accent
+const ACCENT: &str = "\x1b[38;2;180;150;255m";
+const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
+const YELLOW: &str = "\x1b[33m";
 const GRAY: &str = "\x1b[90m";
+const WHITE: &str = "\x1b[97m";
 
-pub fn header(task: &str, branch: &str, mode: &str, n_instructions: usize) {
-    println!();
-    thick_rule();
-    println!("{INDENT}{BOLD}{MAG}Wisp{RST}");
-    print_wrapped(task, BOLD, RST);
-    let meta = if n_instructions > 0 {
-        format!("{branch} | {mode} | {n_instructions} instruction file(s)")
-    } else {
-        format!("{branch} | {mode}")
-    };
-    print_wrapped(&meta, GRAY, RST);
-    thick_rule();
-    println!();
+// ─── Terminal width ───────────────────────────────────────────────────────────
+
+/// Returns the current terminal window width from OS APIs.
+/// Refreshed on every call — safe to poll for resize detection.
+pub fn term_width() -> usize {
+    raw_term_width().clamp(40, 240)
 }
 
-pub fn agent_start(agent: &str, role: &str, step: usize, total: usize) {
-    let color = agent_color(agent);
-    println!();
-    println!(
-        "{INDENT}{BOLD}{color}{}{RST} {DIM}{GRAY}[{step}/{total}] {RST}",
-        agent_display(agent)
-    );
-    print_wrapped(&format!("role: {role}"), GRAY, RST);
-    thin_rule();
-}
-
-pub fn agent_line(line: &str) {
-    println!("{INDENT}> {line}");
-}
-
-pub fn agent_blank() {
-    println!("{INDENT}");
-}
-
-pub fn agent_end(agent: &str, ok: bool) {
-    thin_rule();
-    if ok {
-        println!("{INDENT}{GRN}OK{RST}  {} done\n", agent_display(agent));
-    } else {
-        println!("{INDENT}{RED}ERR{RST} {} stopped\n", agent_display(agent));
+fn raw_term_width() -> usize {
+    #[cfg(windows)]
+    if let Some(w) = windows_term_width() {
+        return w;
     }
-}
-
-pub fn wisp_note(msg: &str) {
-    print_wrapped(&format!("wisp: {msg}"), GRAY, RST);
-}
-
-pub fn finish(session_path: &str, dry_run: bool) {
-    println!();
-    thick_rule();
-    println!("{INDENT}{GRN}Saved{RST}");
-    print_wrapped(session_path, GRAY, RST);
-    if dry_run {
-        print_wrapped(
-            "Use /run, /exec, or --execute-agents to perform real execution.",
-            GRAY,
-            RST,
-        );
-    }
-    thick_rule();
-    println!();
-}
-
-pub fn interactive_header() {
-    println!();
-    thick_rule();
-    println!("{INDENT}{BOLD}{MAG}Wisp{RST}");
-    print_wrapped(
-        "Default interactive mode is safe dry-run preview.",
-        GRAY,
-        RST,
-    );
-    print_wrapped("Use /run or /exec for workflow execution.", GRAY, RST);
-    print_wrapped(
-        "Use !claude or !codex for direct single-agent ask mode.",
-        GRAY,
-        RST,
-    );
-    thick_rule();
-    println!();
-}
-
-pub fn interactive_prompt() {
-    print!("{INDENT}{MAG}>{RST} ");
-}
-
-pub fn interactive_help() {
-    println!();
-    println!("{INDENT}{BOLD}Interactive Commands{RST}");
-    print_wrapped("task              dry-run workflow preview", GRAY, RST);
-    print_wrapped("!task             dry-run workflow preview", GRAY, RST);
-    print_wrapped("~task             dry-run workflow preview", GRAY, RST);
-    print_wrapped("/run task         execute full workflow", GRAY, RST);
-    print_wrapped("/exec task        execute full workflow", GRAY, RST);
-    print_wrapped("!claude task      ask Claude only", GRAY, RST);
-    print_wrapped("!codex task       ask Codex only", GRAY, RST);
-    print_wrapped("/run claude task  execute Claude only", GRAY, RST);
-    print_wrapped("/run codex task   execute Codex only", GRAY, RST);
-    print_wrapped(
-        "/auto task        execute workflow with auto permission mode",
-        GRAY,
-        RST,
-    );
-    print_wrapped(
-        "/auto claude task execute Claude only with auto permission mode",
-        GRAY,
-        RST,
-    );
-    print_wrapped(
-        "/auto codex task  execute Codex only with auto permission mode",
-        GRAY,
-        RST,
-    );
-    print_wrapped("exit              quit", GRAY, RST);
-    println!();
-}
-
-pub fn goodbye() {
-    println!();
-    println!("{INDENT}{GRAY}Bye.{RST}");
-    println!();
-}
-
-pub fn no_config_hint() {
-    println!();
-    thick_rule();
-    println!("{INDENT}{BOLD}{MAG}Wisp{RST}");
-    print_wrapped("No wisp.toml found in this directory.", GRAY, RST);
-    print_wrapped("Run `wisp init` to set up Wisp here.", BOLD, RST);
-    thick_rule();
-    println!();
-}
-
-pub struct ThinkingSpinner {
-    running: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl ThinkingSpinner {
-    pub fn start() -> Self {
-        let running = Arc::new(AtomicBool::new(true));
-        let r = running.clone();
-        let thread = std::thread::spawn(move || {
-            let frames = ["-", "\\", "|", "/"];
-            let mut i = 0usize;
-            while r.load(Ordering::Relaxed) {
-                use std::io::Write;
-                print!(
-                    "\r{INDENT}{GRAY}{} thinking...{RST}",
-                    frames[i % frames.len()]
-                );
-                let _ = std::io::stdout().flush();
-                std::thread::sleep(std::time::Duration::from_millis(80));
-                i += 1;
-            }
-        });
-        ThinkingSpinner {
-            running,
-            thread: Some(thread),
-        }
-    }
-
-    pub fn stop(&mut self) {
-        if self.thread.is_none() {
-            return;
-        }
-        self.running.store(false, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-        use std::io::Write;
-        print!("\r\x1b[2K");
-        let _ = std::io::stdout().flush();
-    }
-}
-
-pub fn agent_display(agent: &str) -> &'static str {
-    match agent {
-        "claude" => "Claude",
-        "codex" => "Codex",
-        _ => "Agent",
-    }
-}
-
-fn agent_color(agent: &str) -> &'static str {
-    match agent {
-        "claude" => CYAN,
-        "codex" => YLW,
-        _ => RST,
-    }
-}
-
-fn thick_rule() {
-    println!("{GRAY}{}{RST}", "=".repeat(content_width() + INDENT.len()));
-}
-
-fn thin_rule() {
-    println!("{INDENT}{GRAY}{}{RST}", "-".repeat(content_width()));
-}
-
-fn print_wrapped(text: &str, prefix: &str, suffix: &str) {
-    for line in wrap_text(text, content_width()) {
-        println!("{INDENT}{prefix}{line}{suffix}");
-    }
-}
-
-fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
-    let mut lines = Vec::new();
-
-    for paragraph in text.lines() {
-        if paragraph.trim().is_empty() {
-            lines.push(String::new());
-            continue;
-        }
-
-        let mut current = String::new();
-        for word in paragraph.split_whitespace() {
-            let current_len = current.chars().count();
-            let word_len = word.chars().count();
-            let next_len = if current.is_empty() {
-                word_len
-            } else {
-                current_len + 1 + word_len
-            };
-
-            if next_len <= width {
-                if !current.is_empty() {
-                    current.push(' ');
-                }
-                current.push_str(word);
-                continue;
-            }
-
-            if !current.is_empty() {
-                lines.push(current);
-                current = String::new();
-            }
-
-            if word_len <= width {
-                current.push_str(word);
-            } else {
-                split_long_word(word, width, &mut lines, &mut current);
-            }
-        }
-
-        if !current.is_empty() {
-            lines.push(current);
-        }
-    }
-
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-
-    lines
-}
-
-fn split_long_word(word: &str, width: usize, lines: &mut Vec<String>, current: &mut String) {
-    let mut chunk = String::new();
-    for ch in word.chars() {
-        if chunk.chars().count() >= width {
-            lines.push(chunk);
-            chunk = String::new();
-        }
-        chunk.push(ch);
-    }
-
-    if chunk.chars().count() == width {
-        lines.push(chunk);
-    } else {
-        *current = chunk;
-    }
-}
-
-fn content_width() -> usize {
-    terminal_width().saturating_sub(INDENT.len()).max(MIN_WIDTH)
-}
-
-fn terminal_width() -> usize {
-    env::var("COLUMNS")
+    std::env::var("COLUMNS")
         .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|width| *width > INDENT.len())
-        .or_else(detect_terminal_width)
-        .unwrap_or(DEFAULT_WIDTH)
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(80)
 }
 
 #[cfg(windows)]
-fn detect_terminal_width() -> Option<usize> {
+fn windows_term_width() -> Option<usize> {
     #[repr(C)]
     struct Coord {
         x: i16,
         y: i16,
     }
-
     #[repr(C)]
     struct SmallRect {
         left: i16,
@@ -319,56 +52,443 @@ fn detect_terminal_width() -> Option<usize> {
         right: i16,
         bottom: i16,
     }
-
     #[repr(C)]
     struct ConsoleScreenBufferInfo {
-        size: Coord,
-        cursor_position: Coord,
-        attributes: u16,
-        window: SmallRect,
-        maximum_window_size: Coord,
+        dw_size: Coord,
+        dw_cursor_position: Coord,
+        w_attributes: u16,
+        sr_window: SmallRect,
+        dw_maximum_window_size: Coord,
     }
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
-        fn GetStdHandle(n_std_handle: u32) -> *mut std::ffi::c_void;
+        fn GetStdHandle(n: u32) -> *mut std::ffi::c_void;
         fn GetConsoleScreenBufferInfo(
-            h_console_output: *mut std::ffi::c_void,
-            lp_console_screen_buffer_info: *mut ConsoleScreenBufferInfo,
+            h: *mut std::ffi::c_void,
+            p: *mut ConsoleScreenBufferInfo,
         ) -> i32;
     }
 
     const STD_OUTPUT_HANDLE: u32 = 0xFFFF_FFF5;
 
     unsafe {
-        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
-        if handle.is_null() {
+        let h = GetStdHandle(STD_OUTPUT_HANDLE);
+        if h.is_null() || h as usize == usize::MAX {
             return None;
         }
-
-        let mut info = ConsoleScreenBufferInfo {
-            size: Coord { x: 0, y: 0 },
-            cursor_position: Coord { x: 0, y: 0 },
-            attributes: 0,
-            window: SmallRect {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-            },
-            maximum_window_size: Coord { x: 0, y: 0 },
-        };
-
-        if GetConsoleScreenBufferInfo(handle, &mut info) == 0 {
-            return None;
+        let mut info: ConsoleScreenBufferInfo = std::mem::zeroed();
+        if GetConsoleScreenBufferInfo(h, &mut info) != 0 {
+            let w = (info.sr_window.right - info.sr_window.left + 1) as usize;
+            if w > 0 { Some(w) } else { None }
+        } else {
+            None
         }
-
-        let width = i32::from(info.window.right) - i32::from(info.window.left) + 1;
-        usize::try_from(width).ok()
     }
 }
 
-#[cfg(not(windows))]
-fn detect_terminal_width() -> Option<usize> {
-    None
+fn heavy_rule() -> String {
+    format!("{GRAY}{}{RESET}", "━".repeat(term_width()))
+}
+
+/// Clear the screen and redraw the interactive header (called on terminal resize).
+pub fn on_resize() {
+    print!("\x1b[2J\x1b[H");
+    let _ = std::io::stdout().flush();
+    interactive_header();
+}
+
+// ─── Live command completions ─────────────────────────────────────────────────
+
+const COMPLETIONS: &[(&str, &str)] = &[
+    ("/run",    "execute workflow interactively"),
+    ("/auto",   "execute workflow (auto-approve)"),
+    ("/claude", "run Claude directly"),
+    ("/codex",  "run Codex directly"),
+    ("/help",   "show commands"),
+    ("/exit",   "exit wisp"),
+    ("/quit",   "exit wisp"),
+];
+
+pub fn completions_for(input: &str) -> Vec<(&'static str, &'static str)> {
+    if input == "/" || input.is_empty() {
+        return COMPLETIONS.to_vec();
+    }
+    COMPLETIONS
+        .iter()
+        .filter(|(cmd, _)| cmd.starts_with(input))
+        .copied()
+        .collect()
+}
+
+/// Redraw `  › {input}` plus a live completion box when the input starts with `/`.
+/// Returns the number of lines occupied by the box (0 if no box).
+/// Leaves the cursor at the end of the input on the prompt line.
+pub fn redraw_prompt_with_completions(input: &str) -> usize {
+    use std::io::Write;
+
+    // Clear from start of current line to end of screen, then reprint prompt.
+    print!("\r\x1b[J");
+    print!("  {ACCENT}›{RESET} {input}");
+
+    // Show box only while completing a slash-command (no space yet).
+    if !input.starts_with('/') || input.contains(' ') {
+        let _ = std::io::stdout().flush();
+        return 0;
+    }
+
+    let matches = completions_for(input);
+
+    // Inner content width (between the │ borders).
+    let box_inner = (term_width().saturating_sub(4)).min(56);
+    let cmd_col = 18usize;
+    let desc_col = box_inner.saturating_sub(cmd_col + 3); // 1 sp + cmd + 2 sp = cmd+3
+
+    let h_line = "─".repeat(box_inner + 2); // +2 for the spaces inside borders
+    let top = format!("╭{h_line}╮");
+    let bot = format!("╰{h_line}╯");
+
+    if matches.is_empty() {
+        let msg = format!(" {:<box_inner$} ", "no matching command");
+        print!("\n  {GRAY}{top}\n  │{msg}│\n  {bot}{RESET}");
+        let extra = 3usize;
+        print!("\x1b[{extra}A\r\x1b[{}C", 4 + input.len());
+        let _ = std::io::stdout().flush();
+        return extra;
+    }
+
+    print!("\n  {GRAY}{top}{RESET}");
+    for (cmd, desc) in &matches {
+        let desc_trimmed = if desc.len() > desc_col {
+            &desc[..desc_col]
+        } else {
+            desc
+        };
+        let row = format!(" {cmd:<cmd_col$}  {desc_trimmed:<desc_col$} ");
+        print!("\n  {GRAY}│{RESET}{WHITE}{row}{GRAY}│{RESET}");
+    }
+    print!("\n  {GRAY}{bot}{RESET}");
+
+    let extra = matches.len() + 2;
+    // Move cursor back to input line, then to position after the typed text.
+    print!("\x1b[{extra}A\r\x1b[{}C", 4 + input.len());
+    let _ = std::io::stdout().flush();
+    extra
+}
+
+// ─── Agent display names ──────────────────────────────────────────────────────
+
+pub fn agent_display(name: &str) -> String {
+    match name {
+        "claude" => "Claude".to_string(),
+        "codex" => "Codex".to_string(),
+        _ => {
+            let mut s = name.to_string();
+            if let Some(first) = s.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            s
+        }
+    }
+}
+
+// ─── Interactive UI ───────────────────────────────────────────────────────────
+
+pub fn interactive_header() {
+    let rule = heavy_rule();
+    println!("{rule}");
+    println!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp{RESET}  {GRAY}—{RESET}  local coding agent");
+    println!(
+        "     {GRAY}Claude implements · Codex ships · you stay in control{RESET}"
+    );
+    println!("{rule}");
+    println!();
+    println!("  Type a task and press Enter {GRAY}—{RESET} default is dry-run preview.");
+    println!("  {GRAY}Default is dry-run.  Use {WHITE}/run{GRAY} to execute  ·  {WHITE}exit{GRAY} to quit.{RESET}");
+    println!();
+}
+
+pub fn no_config_hint() {
+    let rule = heavy_rule();
+    println!("{rule}");
+    println!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp{RESET}  {GRAY}—{RESET}  not initialized");
+    println!("{rule}");
+    println!();
+    println!("  Run {BOLD}wisp init{RESET} to get started.");
+    println!();
+}
+
+pub fn interactive_prompt() {
+    print!("  {ACCENT}›{RESET} ");
+}
+
+pub fn goodbye() {
+    println!();
+    println!("  {GRAY}✦  bye —{RESET}");
+    println!();
+}
+
+pub fn interactive_help() {
+    let rule = heavy_rule();
+    println!("{rule}");
+    println!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Commands{RESET}");
+    println!("{rule}");
+    println!();
+
+    let cmds: &[(&str, &str)] = &[
+        ("<task>", "plan workflow (dry-run)"),
+        ("/run <task>", "execute workflow interactively"),
+        ("/auto <task>", "execute workflow (auto-approve)"),
+        ("/claude <task>", "run Claude directly"),
+        ("/codex <task>", "run Codex directly"),
+        ("/help", "show this help"),
+        ("exit / quit", "exit wisp"),
+    ];
+
+    for (cmd, desc) in cmds {
+        println!("  {WHITE}{cmd:<26}{RESET}  {GRAY}{desc}{RESET}");
+    }
+    println!();
+}
+
+pub fn interactive_command_preview(query: &str) {
+    let all: &[(&str, &str)] = &[
+        ("run",    "/run <task>      —  execute workflow interactively"),
+        ("auto",   "/auto <task>     —  execute workflow (auto-approve)"),
+        ("claude", "/claude <task>   —  run Claude directly"),
+        ("codex",  "/codex <task>    —  run Codex directly"),
+        ("help",   "/help            —  show all commands"),
+        ("exit",   "/exit            —  exit wisp"),
+        ("quit",   "/quit            —  exit wisp"),
+    ];
+
+    let matches: Vec<&str> = if query.is_empty() {
+        all.iter().map(|(_, desc)| *desc).collect()
+    } else {
+        all.iter()
+            .filter(|(key, _)| key.starts_with(query))
+            .map(|(_, desc)| *desc)
+            .collect()
+    };
+
+    println!();
+    if matches.is_empty() {
+        println!("  {GRAY}no matching command for /{query}{RESET}");
+    } else {
+        for desc in &matches {
+            println!("  {GRAY}{desc}{RESET}");
+        }
+    }
+    println!();
+}
+
+// ─── Workflow header ──────────────────────────────────────────────────────────
+
+pub fn header(task: &str, branch: &str, mode: &str, instruction_files: usize) {
+    let rule = heavy_rule();
+
+    println!("{rule}");
+    println!(
+        "  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp{RESET}  {GRAY}—{RESET}  implement · patch · review · ship"
+    );
+    println!("{rule}");
+    println!();
+
+    let task_preview = if task.chars().count() > 62 {
+        let t: String = task.chars().take(61).collect();
+        format!("{t}…")
+    } else {
+        task.to_string()
+    };
+
+    println!("  {GRAY}task    {RESET}{task_preview}");
+    println!("  {GRAY}branch  {RESET}{branch}");
+    println!("  {GRAY}mode    {RESET}{mode}");
+    if instruction_files > 0 {
+        let plural = if instruction_files == 1 { "" } else { "s" };
+        println!("  {GRAY}files   {RESET}{instruction_files} instruction file{plural} loaded");
+    }
+    println!();
+}
+
+// ─── Agent step UI ────────────────────────────────────────────────────────────
+
+pub fn agent_start(agent: &str, role: &str, step: usize, total: usize) {
+    let name = agent_display(agent);
+    println!("  {GRAY}┌─{RESET} {BOLD}[{step}/{total}]{RESET}  {ACCENT}{name}{RESET}  {GRAY}—  {role}{RESET}");
+    println!();
+}
+
+pub fn agent_end(agent: &str, ok: bool) {
+    let name = agent_display(agent);
+    println!();
+    if ok {
+        println!("  {GRAY}└─{RESET}  {name}  {GREEN}done ✓{RESET}");
+    } else {
+        println!("  {GRAY}└─{RESET}  {name}  {RED}failed ✗{RESET}");
+    }
+    println!();
+}
+
+pub fn agent_line(line: &str) {
+    println!("    {line}");
+}
+
+pub fn agent_blank() {
+    println!();
+}
+
+pub fn wisp_note(msg: &str) {
+    println!("  {GRAY}·  {msg}{RESET}");
+    println!();
+}
+
+// ─── Finish banner ────────────────────────────────────────────────────────────
+
+pub fn finish(session_path: &str, is_dry_run: bool) {
+    let rule = heavy_rule();
+
+    println!("{rule}");
+    if is_dry_run {
+        println!(
+            "  {ACCENT}✦{RESET}  {GREEN}{BOLD}done{RESET}  {GRAY}—  dry-run complete · no changes were made{RESET}"
+        );
+    } else {
+        println!(
+            "  {ACCENT}✦{RESET}  {GREEN}{BOLD}done{RESET}  {GRAY}—  workflow complete{RESET}"
+        );
+    }
+    println!("{rule}");
+    println!();
+    println!("  {GRAY}session  {RESET}{DIM}{session_path}{RESET}");
+    if is_dry_run {
+        println!("  {GRAY}         use {WHITE}/run <task>{GRAY} to execute for real{RESET}");
+    }
+    println!();
+}
+
+// ─── Init output ──────────────────────────────────────────────────────────────
+
+pub fn init_header() {
+    let rule = heavy_rule();
+    println!("{rule}");
+    println!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp Init{RESET}");
+    println!("{rule}");
+    println!();
+}
+
+pub fn init_created(path: &str) {
+    println!("  {GREEN}+{RESET}  {path}");
+}
+
+pub fn init_exists(path: &str) {
+    println!("  {GRAY}·  {path}  (already exists){RESET}");
+}
+
+pub fn init_overwrite_hint() {
+    println!("  {YELLOW}!{RESET}  {BOLD}wisp.toml{RESET} already exists  {GRAY}—  use --force to overwrite{RESET}");
+}
+
+pub fn init_done() {
+    println!();
+    println!("  {ACCENT}✦{RESET}  {GREEN}{BOLD}done{RESET}  {GRAY}—  wisp initialized{RESET}");
+    println!();
+    println!("  {GRAY}Edit {WHITE}wisp.toml{GRAY} to configure agents and workflow.{RESET}");
+    println!("  {GRAY}Run {WHITE}wisp doctor{GRAY} to verify your setup.{RESET}");
+    println!();
+}
+
+pub fn init_error(path: &str, err: &dyn std::fmt::Display) {
+    println!("  {RED}✗{RESET}  failed to create {path}  {GRAY}—  {err}{RESET}");
+}
+
+// ─── Doctor output ────────────────────────────────────────────────────────────
+
+pub fn doctor_header() {
+    let rule = heavy_rule();
+    println!("{rule}");
+    println!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp Doctor{RESET}");
+    println!("{rule}");
+    println!();
+}
+
+pub fn doctor_check(label: &str, ok: bool, hint: Option<&str>) {
+    if ok {
+        println!("  {GREEN}✓{RESET}  {label}");
+    } else {
+        println!("  {RED}✗{RESET}  {label}");
+        if let Some(h) = hint {
+            println!("     {GRAY}{h}{RESET}");
+        }
+    }
+}
+
+pub fn doctor_summary(env_ok: bool, agents_ok: bool) {
+    println!();
+    if env_ok && agents_ok {
+        println!(
+            "  {ACCENT}✦{RESET}  {GREEN}{BOLD}all checks passed{RESET}  {GRAY}—  wisp is fully ready{RESET}"
+        );
+    } else if env_ok {
+        println!("  {ACCENT}✦{RESET}  {GREEN}{BOLD}ready{RESET}  {GRAY}—  dry-run mode{RESET}");
+        println!();
+        println!(
+            "  {GRAY}Install Claude CLI and Codex CLI to enable {WHITE}--execute-agents{GRAY}.{RESET}"
+        );
+    } else {
+        println!("  {RED}✗  some checks failed{RESET}");
+        println!();
+        println!(
+            "  {GRAY}Run {WHITE}wisp init{GRAY} and install missing tools.{RESET}"
+        );
+    }
+    println!();
+}
+
+// ─── Thinking spinner ─────────────────────────────────────────────────────────
+
+pub struct ThinkingSpinner {
+    stop_flag: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl ThinkingSpinner {
+    pub fn start() -> Self {
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop_flag);
+
+        let handle = thread::spawn(move || {
+            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut i = 0usize;
+            while !stop_clone.load(Ordering::Relaxed) {
+                print!(
+                    "\r  {ACCENT}✦{RESET}  {GRAY}{} thinking…{RESET}   ",
+                    frames[i % frames.len()]
+                );
+                let _ = std::io::stdout().flush();
+                thread::sleep(Duration::from_millis(80));
+                i = i.wrapping_add(1);
+            }
+            print!("\r{}\r", " ".repeat(40));
+            let _ = std::io::stdout().flush();
+        });
+
+        ThinkingSpinner {
+            stop_flag,
+            handle: Some(handle),
+        }
+    }
+
+    pub fn stop(&mut self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for ThinkingSpinner {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }

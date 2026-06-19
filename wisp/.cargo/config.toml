@@ -1,0 +1,3 @@
+# Cargo configuration for wisp crate.
+# To build and deploy to npm/dist/ in one step, run from repo root:
+#   bash build.sh

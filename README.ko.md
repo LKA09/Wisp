@@ -15,14 +15,14 @@ Wisp는 Claude CLI와 Codex CLI를 로컬에서 오케스트레이션하는 코�
 
 ```text
 task              dry-run preview only
-!task             dry-run preview only
-~task             dry-run preview only
+/                 preview interactive commands
+/help             show command help
 
 /run task         full workflow execute
 /exec task        full workflow execute
 
-!claude task      ask Claude only
-!codex task       ask Codex only
+/claude task      ask Claude only
+/codex task       ask Codex only
 
 /run claude task  execute Claude only
 /run codex task   execute Codex only
@@ -32,7 +32,9 @@ task              dry-run preview only
 /auto codex task  execute Codex only with auto permission mode
 ```
 
-`!claude`, `!codex`는 full workflow가 아니라 direct single-agent 세션이다.
+`/claude`, `/codex`는 full workflow가 아니라 direct single-agent 세션이다.
+
+호환성 때문에 `!claude`, `!codex`, `!task`, `~task`도 아직 동작하지만, 기본 interactive command prefix는 `/`로 통일했다.
 
 ## CLI
 

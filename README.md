@@ -15,14 +15,14 @@ Wisp is a local coding agent orchestrator for Claude CLI and Codex CLI. It keeps
 
 ```text
 task              dry-run preview only
-!task             dry-run preview only
-~task             dry-run preview only
+/                 preview interactive commands
+/help             show command help
 
 /run task         full workflow execute
 /exec task        full workflow execute
 
-!claude task      ask Claude only
-!codex task       ask Codex only
+/claude task      ask Claude only
+/codex task       ask Codex only
 
 /run claude task  execute Claude only
 /run codex task   execute Codex only
@@ -32,7 +32,9 @@ task              dry-run preview only
 /auto codex task  execute Codex only with auto permission mode
 ```
 
-`!claude` and `!codex` are direct single-agent sessions. They do not run the full implement/patch/review/ship workflow.
+`/claude` and `/codex` are direct single-agent sessions. They do not run the full implement/patch/review/ship workflow.
+
+Legacy aliases `!claude`, `!codex`, `!task`, and `~task` still work for compatibility, but `/` is now the primary interactive command prefix.
 
 ## CLI
 

@@ -28,10 +28,28 @@ try {
   process.exit(1);
 }
 
-// 2. Copy
+// 2. Copy (retry on Windows EBUSY — antivirus/linker may briefly lock the file)
 fs.mkdirSync(distDir, { recursive: true });
 const dest = path.join(distDir, binaryName);
-fs.copyFileSync(releaseBin, dest);
+
+function copyWithRetry(src, dst, attempts = 5, delayMs = 500) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      fs.copyFileSync(src, dst);
+      return;
+    } catch (e) {
+      if (e.code === 'EBUSY' && i < attempts - 1) {
+        const wait = delayMs * (i + 1);
+        console.log(`[wisp] File busy, retrying in ${wait}ms... (${i + 1}/${attempts - 1})`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait);
+      } else {
+        throw e;
+      }
+    }
+  }
+}
+
+copyWithRetry(releaseBin, dest);
 
 if (!isWin) {
   fs.chmodSync(dest, 0o755);
