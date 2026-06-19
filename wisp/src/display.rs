@@ -94,6 +94,61 @@ pub fn finish(session_path: &str, dry_run: bool) {
     println!();
 }
 
+// ─── Interactive session ──────────────────────────────────────────────────────
+
+pub fn interactive_header() {
+    println!();
+    thick_rule();
+    println!();
+    println!("  {}{}✦ Wisp{}  —  local coding agent", BOLD, MAG, RST);
+    println!();
+    println!(
+        "  {}Claude implements  ·  Codex ships  ·  you stay in control{}",
+        GRAY, RST
+    );
+    println!();
+    thick_rule();
+    println!();
+    println!("  {}Type a task and press Enter.{}", GRAY, RST);
+    println!("  {}Prefix with {}!{}{} to run real agents.  {}exit{}{} to quit.{}",
+        GRAY, RST, BOLD, GRAY, RST, BOLD, GRAY, RST);
+    println!();
+}
+
+pub fn interactive_prompt() {
+    print!("  {}✦{} ", MAG, RST);
+}
+
+pub fn interactive_help() {
+    println!();
+    println!("  {}Commands:{}", BOLD, RST);
+    println!("  {}  <task>{}      dry-run — generates prompts, no agents invoked", GRAY, RST);
+    println!("  {}  !<task>{}     execute agents (Claude + Codex CLIs required)", GRAY, RST);
+    println!("  {}  exit{}        quit Wisp", GRAY, RST);
+    println!("  {}  help{}        show this", GRAY, RST);
+    println!();
+}
+
+pub fn goodbye() {
+    println!();
+    println!("  {}Bye.{}", GRAY, RST);
+    println!();
+}
+
+pub fn no_config_hint() {
+    println!();
+    thick_rule();
+    println!();
+    println!("  {}{}✦ Wisp{}", BOLD, MAG, RST);
+    println!();
+    println!("  {}No wisp.toml found in this directory.{}", GRAY, RST);
+    println!();
+    println!("  Run {}wisp init{} to set up Wisp here.", BOLD, RST);
+    println!();
+    thick_rule();
+    println!();
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 pub fn agent_display(agent: &str) -> &'static str {

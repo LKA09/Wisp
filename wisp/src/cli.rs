@@ -8,8 +8,76 @@ use crate::language::{detect, msg};
 use crate::workflow::{summon as run_summon, SummonArgs};
 
 // ---------------------------------------------------------------------------
-// wisp (no args)
+// wisp (no args) — interactive session
 // ---------------------------------------------------------------------------
+
+pub fn interactive() {
+    use crate::display;
+    use crate::language::Language;
+    use std::io::{self, Write};
+
+    // If wisp.toml doesn't exist, guide the user first.
+    if !config::Config::exists() {
+        display::no_config_hint();
+        return;
+    }
+
+    display::interactive_header();
+
+    loop {
+        display::interactive_prompt();
+        io::stdout().flush().ok();
+
+        let mut input = String::new();
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => break, // EOF (Ctrl+D)
+            Err(_) => break,
+            Ok(_) => {}
+        }
+
+        let task = input.trim();
+
+        if task.is_empty() {
+            continue;
+        }
+
+        match task {
+            "exit" | "quit" | "q" | "/exit" | "/quit" => {
+                display::goodbye();
+                break;
+            }
+            "/help" | "help" => {
+                display::interactive_help();
+                continue;
+            }
+            _ => {}
+        }
+
+        // Prefix `!` → execute-agents mode, otherwise dry-run.
+        let (task_str, execute) = if let Some(t) = task.strip_prefix('!') {
+            (t.trim(), true)
+        } else {
+            (task, false)
+        };
+
+        if task_str.is_empty() {
+            continue;
+        }
+
+        let lang = detect(task_str);
+        let args = SummonArgs {
+            task: task_str.to_string(),
+            execute_agents: execute,
+            allow_dirty: true,
+            lang,
+        };
+
+        if let Err(e) = run_summon(args) {
+            let lang2 = detect(task_str);
+            eprintln!("{}", msg(&lang2, &format!("Error: {}", e), &format!("오류: {}", e)));
+        }
+    }
+}
 
 pub fn print_intro() {
     println!("Wisp\n");

@@ -55,7 +55,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        None => cli::print_intro(),
+        None => cli::interactive(),
         Some(Commands::Init { force }) => cli::init(force),
         Some(Commands::Doctor) => cli::doctor(),
         Some(Commands::Summon {
