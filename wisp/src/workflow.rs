@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+﻿use anyhow::{Context, Result, bail};
 use std::time::Instant;
 
 use crate::agent::{
@@ -352,7 +352,7 @@ fn validate_execute_preconditions(
         bail!(msg(
             lang,
             "Working tree has uncommitted changes. Re-run with --allow-dirty to proceed.",
-            "?묒뾽 ?몃━??而ㅻ컠?섏? ?딆? 蹂寃쎌씠 ?덉뒿?덈떎. 怨꾩냽?섎젮硫?--allow-dirty瑜?紐낆떆?섏꽭??"
+            "워킹 트리에 커밋되지 않은 변경사항이 있습니다. 계속하려면 --allow-dirty를 지정하세요."
         ));
     }
 
@@ -364,7 +364,7 @@ fn validate_execute_preconditions(
                 "Refusing to execute agents on protected branch `{branch}`. Create a work branch first."
             ),
             &format!(
-                "蹂댄샇 釉뚮옖移?`{branch}`?먯꽌???ㅼ젣 agent ?ㅽ뻾??留됱뒿?덈떎. ?묒뾽 釉뚮옖移섎? 留뚮뱺 ???ㅼ떆 ?ㅽ뻾?섏꽭??"
+                "보호된 브랜치 `{branch}`에서 에이전트 실행이 차단됩니다. 작업 브랜치를 먼저 만드세요."
             )
         ));
     }
@@ -631,7 +631,7 @@ fn format_policy_violation_error(
             details
         ),
         &format!(
-            "?뺤콉 ?꾨컲?쇰줈 {} ({}) ?④퀎 ?ㅽ뻾 ??以묐떒?덉뒿?덈떎: {}",
+            "정책 위반으로 {} ({}) 실행 후 차단됩니다: {}",
             display::agent_display(agent),
             role,
             details

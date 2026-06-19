@@ -1,4 +1,4 @@
-use std::fs;
+﻿use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -459,7 +459,7 @@ fn run_summon_command(
             msg(
                 &lang,
                 "Error: wisp.toml not found. Run `wisp init` first.",
-                "?ㅻ쪟: wisp.toml??李얠쓣 ???놁뒿?덈떎. 癒쇱? `wisp init`???ㅽ뻾?섏꽭??"
+                "오류: wisp.toml을 찾을 수 없습니다. 먼저 `wisp init`을 실행하세요."
             )
         );
         std::process::exit(1);
@@ -477,7 +477,7 @@ fn run_summon_command(
         let lang2 = detect(task);
         eprintln!(
             "{}",
-            msg(&lang2, &format!("Error: {}", e), &format!("?ㅻ쪟: {}", e))
+            msg(&lang2, &format!("Error: {}", e), &format!("오류: {}", e))
         );
         std::process::exit(1);
     }
@@ -498,7 +498,7 @@ fn run_single_agent_command(
             msg(
                 &lang,
                 "Error: wisp.toml not found. Run `wisp init` first.",
-                "?ㅻ쪟: wisp.toml??李얠쓣 ???놁뒿?덈떎. 癒쇱? `wisp init`???ㅽ뻾?섏꽭??"
+                "오류: wisp.toml을 찾을 수 없습니다. 먼저 `wisp init`을 실행하세요."
             )
         );
         std::process::exit(1);
@@ -517,7 +517,7 @@ fn run_single_agent_command(
         let lang2 = detect(task);
         eprintln!(
             "{}",
-            msg(&lang2, &format!("Error: {}", e), &format!("?ㅻ쪟: {}", e))
+            msg(&lang2, &format!("Error: {}", e), &format!("오류: {}", e))
         );
         std::process::exit(1);
     }
