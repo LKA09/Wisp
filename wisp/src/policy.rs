@@ -239,6 +239,8 @@ mod tests {
             status_raw: String::new(),
             status_entries: Vec::new(),
             diff_name_status: String::new(),
+            diff_full: String::new(),
+            diff_cached: String::new(),
         }
     }
 

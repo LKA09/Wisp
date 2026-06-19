@@ -205,9 +205,6 @@ fn interactive_raw(
     raw: crate::input::RawConsole,
     resize_rx: std::sync::mpsc::Receiver<()>,
 ) {
-    use crate::{display, input};
-    use std::time::Duration;
-
     loop {
         let Some(line) = read_raw_line(&raw, &resize_rx) else {
             break;
@@ -320,30 +317,6 @@ fn interactive_lines(resize_rx: std::sync::mpsc::Receiver<()>) {
     }
 }
 
-fn read_interactive_message(rx: &std::sync::mpsc::Receiver<String>) -> Option<String> {
-    let first = rx.recv().ok()?;
-    if first.trim_start().starts_with('/') {
-        return Some(first);
-    }
-    let mut lines = vec![first];
-
-    while let Ok(line) = rx.recv_timeout(std::time::Duration::from_millis(40)) {
-        lines.push(line);
-    }
-
-    Some(lines.join("\n"))
-}
-
-pub fn print_intro() {
-    use crate::display;
-    display::interactive_header();
-    println!("  Usage:");
-    println!("    wisp init");
-    println!("    wisp doctor");
-    println!("    wisp summon \"<task>\"");
-    println!("    wisp ask <agent> \"<task>\" --execute-agents");
-    println!();
-}
 
 pub fn init(force: bool) {
     use crate::display;
@@ -602,12 +575,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn slash_commands_are_not_multiline_tasks() {
-        let (tx, rx) = std::sync::mpsc::channel();
-        tx.send("/".to_string()).unwrap();
-        tx.send("/exit".to_string()).unwrap();
-
-        assert_eq!(super::read_interactive_message(&rx), Some("/".to_string()));
-    }
 }
