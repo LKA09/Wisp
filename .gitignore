@@ -1,0 +1,18 @@
+# Rust build artifacts
+wisp/target/
+
+# npm binary distribution (compiled locally, not committed)
+npm/dist/
+
+# Wisp runtime data (user-specific, not committed)
+.wisp/sessions/
+wisp.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp

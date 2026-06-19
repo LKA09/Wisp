@@ -1,0 +1,29 @@
+{
+  "name": "@lir09/wisp",
+  "version": "0.1.0",
+  "description": "A local personal coding agent for Claude and Codex CLI.",
+  "bin": {
+    "wisp": "./bin/wisp.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lir09/wisp"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "codex",
+    "coding-agent",
+    "orchestrator"
+  ]
+}
