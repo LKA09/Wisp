@@ -1,284 +1,131 @@
-<div align="center">
+# Wisp
 
-# ✦ Wisp
+Wisp는 Claude CLI와 Codex CLI를 로컬에서 오케스트레이션하는 코딩 에이전트 런타임이다. 모든 실행 기록은 `.wisp/sessions/` 아래에 저장되고, 기본 동작은 안전한 dry-run이다.
 
-**로컬 개인 코딩 에이전트 오케스트레이터.**
+## 기본 안전 정책
 
-*Claude가 구현하고, Codex가 배송하며, 결정은 당신이 내립니다.*
+- 기본 모드는 dry-run이다.
+- protected branch에서는 실제 실행을 막는다.
+- 워킹 트리가 dirty 상태이면 `--allow-dirty` 없이는 실행하지 않는다.
+- session에는 prompt, output, meta, git snapshot이 저장된다.
+- 커밋 전에는 반드시 git diff를 검토한다.
+- 중요한 브랜치에서는 `--execute-agents`를 쓰지 말고 feature branch를 사용한다.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
-[![MVP](https://img.shields.io/badge/status-MVP-yellow.svg)]()
+## Interactive Mode
 
-[English](./README.md)
+```text
+task              dry-run preview only
+!task             dry-run preview only
+~task             dry-run preview only
 
-</div>
+/run task         full workflow execute
+/exec task        full workflow execute
 
----
+!claude task      ask Claude only
+!codex task       ask Codex only
 
-## Wisp란?
+/run claude task  execute Claude only
+/run codex task   execute Codex only
 
-Wisp는 당신과 AI 코딩 도구 사이에서 구조적이고 안전한 워크플로우로 두 CLI 에이전트를 조율합니다:
+/auto task        execute workflow with auto permission mode
+/auto claude task execute Claude only with auto permission mode
+/auto codex task  execute Codex only with auto permission mode
+```
 
-| 에이전트 | 역할 |
-|---|---|
-| **Claude CLI** | 구현자(Implementer) · 리뷰어(Reviewer) |
-| **Codex CLI** | 패처(Patcher) · 시퍼(Shipper) |
+`!claude`, `!codex`는 full workflow가 아니라 direct single-agent 세션이다.
 
-모든 실행 내역은 로컬에 기록됩니다. 명시적인 승인 없이는 커밋도, 푸시도 하지 않습니다.
-
-> **MVP 단계** — 핵심 구조, 설정, CLI, 세션 로깅, 워크플로우 스켈레톤이 모두 구현되어 있습니다.
-> 실제 에이전트 호출은 `--execute-agents` 플래그와 Claude/Codex CLI 설치가 필요합니다.
-
----
-
-## 빠른 시작
+## CLI
 
 ```bash
-# 1. 빌드
-cd wisp && cargo build --release
-
-# 2. 프로젝트에 초기화
-cd my-project
 wisp init
-
-# 3. 환경 점검
 wisp doctor
-
-# 4. 에이전트 소환 (기본값: 드라이런 — 안전)
-wisp summon "인증 모듈에 에러 핸들링 추가해줘"
+wisp summon "task"
+wisp summon "task" --execute-agents
+wisp ask claude "task"
+wisp ask claude "task" --execute-agents
+wisp ask codex "task" --execute-agents --permission auto
+wisp ask codex "task" --permission skip
 ```
 
----
+## Permission Mode
 
-## 설치
+- `interactive`: 터미널에서 사용자가 직접 Enter, `y`, `n` 등을 입력한다.
+- `auto`: 설정된 auto-approve 인자를 agent CLI에 넘긴다.
+- `skip`: 가능하면 권한이 필요한 실행을 피한다.
 
-### npm (권장)
+이제 기본 실행 경로는 child stdin에 prompt를 쓰고 닫는 방식이 아니다. prompt는 session 파일이나 command arg로 전달하고, agent stdin은 사용자 터미널에 연결해 둔다. 그래서 Claude/Codex가 실행 중 권한을 물으면 사용자가 직접 입력할 수 있다.
 
-```bash
-npm install -g @lka09/wisp
-```
-
-postinstall 스크립트가 현재 플랫폼에 맞는 바이너리를 GitHub Releases에서 자동으로 다운로드합니다.
-
-> **에이전트 CLI** — Wisp는 드라이런 모드에서 별도 의존성 없이 바로 사용할 수 있습니다. 실제 에이전트를 실행하려면 (`--execute-agents`) 둘 다 설치하세요:
->
-> ```bash
-> npm install -g @anthropic-ai/claude-code   # Claude — 구현자 + 리뷰어
-> npm install -g @openai/codex               # Codex  — 패처 + 시퍼
-> ```
-
-### 소스에서 빌드
-
-[Rust](https://rustup.rs/) 1.75+ 와 [Node.js](https://nodejs.org/) 16+ 가 필요합니다.
-
-```bash
-git clone https://github.com/LKA09/Wisp
-cd Wisp
-npm run build          # Rust 빌드 + 바이너리를 npm/dist/에 복사
-npm run install:local  # 빌드 + npm link (wisp 명령어 전역 등록)
-```
-
-단계별 실행:
-
-```bash
-cd wisp && cargo build --release
-node npm/scripts/build.js   # npm/dist/에 바이너리 복사
-cd npm && npm link
-```
-
----
-
-## 명령어
-
-### `wisp`
-
-```
-Wisp
-
-A local personal coding agent.
-
-Usage:
-  wisp init
-  wisp doctor
-  wisp summon "<task>"
-```
-
-### `wisp init`
-
-현재 디렉토리에 Wisp를 초기화합니다.
-
-```
-Created wisp.toml
-Created .wisp/sessions/
-Created .wisp/instructions.md
-```
-
-```bash
-wisp init           # 최초 설정
-wisp init --force   # 기존 wisp.toml 덮어쓰기
-```
-
-### `wisp doctor`
-
-환경을 점검하고 필요한 설치 방법을 안내합니다.
-
-```
-Wisp Doctor
-
-  [OK  ] Git installed
-  [OK  ] Git repository
-  [FAIL] Claude CLI (claude)
-      Install: npm install -g @anthropic-ai/claude-code
-  [FAIL] Codex CLI (codex)
-      Install: npm install -g @openai/codex
-  [OK  ] wisp.toml exists
-  [OK  ] .wisp/sessions/ exists
-
-Note: Claude/Codex CLIs are optional for dry-run mode.
-```
-
-### `wisp summon "<task>"`
-
-핵심 명령어. 작업에 대한 전체 에이전트 워크플로우를 실행합니다.
-
-```bash
-wisp summon "파서 테스트 코드 작성해줘"
-wisp summon "README 정리해줘"                      # 한국어 입력 → 한국어 출력
-wisp summon "인증 리팩토링" --allow-dirty           # 미커밋 변경사항 무시
-wisp summon "인증 리팩토링" --execute-agents        # 실제 에이전트 실행
-```
-
-**드라이런 모드 (기본값)** — 안전하고 부작용 없음:
-
-- 작업 언어 감지 (한국어 → 한국어 UI 출력)
-- `wisp.toml` 및 프로젝트 지시사항 파일 로드
-- 4개 에이전트 역할별 영문 프롬프트 생성
-- 타임스탬프 세션 디렉토리에 프롬프트 + 플레이스홀더 출력 저장
-- `git status` 및 `git diff` 캡처
-
-**`--execute-agents`** — Claude와 Codex CLI를 실제로 호출합니다.
-
----
-
-## 에이전트 워크플로우
-
-```
-wisp summon "작업"
-      │
-      ├─ 1. Claude  →  implement     (코드 작성)
-      ├─ 2. Codex   →  patch         (최소 수정 적용)
-      ├─ 3. Claude  →  review        (APPROVED / CHANGES_REQUESTED / NEEDS_USER_DECISION)
-      └─ 4. Codex   →  ship          (커밋 메시지 제안 + 푸시 체크리스트)
-                                      ↑
-                              커밋·푸시 전 반드시
-                              사용자 승인 필요
-```
-
----
-
-## 세션 구조
-
-`wisp summon`을 실행할 때마다 완전한 감사 추적 디렉토리가 생성됩니다:
-
-```
-.wisp/sessions/20260619-143000/
-├── task.original.txt           원본 작업 문자열
-├── task.normalized.en.md       영문 정규화 작업
-├── instructions.loaded.md      로드된 프로젝트 지시사항
-│
-├── prompts/
-│   ├── claude.implement.en.md
-│   ├── codex.patch.en.md
-│   ├── claude.review.en.md
-│   └── codex.ship.en.md
-│
-├── outputs/
-│   ├── claude.implement.out.md
-│   ├── codex.patch.out.md
-│   ├── claude.review.out.md
-│   └── codex.ship.out.md
-│
-├── git/
-│   ├── status.txt
-│   └── diff.patch
-│
-└── summary.md
-```
-
----
-
-## 설정 파일
-
-`wisp.toml`은 `wisp init`이 생성합니다. 프로젝트에 맞게 수정하세요.
+## 설정 예시
 
 ```toml
 [agents.claude]
-cmd  = "claude"
-args = ["-p"]
+cmd = "claude"
+args = ["-p", "{prompt}"]
+input = "arg"
+permission_interactive_args = []
+permission_auto_args = []
+permission_skip_args = []
 
 [agents.codex]
-cmd  = "codex"
-args = ["exec"]
+cmd = "codex"
+args = ["exec", "-s", "workspace-write", "{prompt}"]
+input = "arg"
+permission_interactive_args = []
+permission_auto_args = []
+permission_skip_args = []
 
 [workflow]
-implementer      = "claude"
-patcher          = "codex"
-reviewer         = "claude"
-shipper          = "codex"
+implementer = "claude"
+patcher = "codex"
+reviewer = "claude"
+shipper = "codex"
 max_review_rounds = 2
 
 [approval]
-push                       = "always"   # 명시적 승인 필요
-commit                     = "ask"
-add_dependency             = "ask"
-delete_file                = "ask"
-modify_protected_file      = "deny"
+push = "deny"
+commit = "ask"
+add_dependency = "ask"
+delete_file = "ask"
+modify_protected_file = "deny"
 continue_after_test_failure = "ask"
 
 [policy]
-protected_paths = [".env", ".git", "id_rsa", "secrets.toml", "credentials.json"]
-deny_commands   = ["git push --force", "rm -rf /", "cargo publish"]
+protected_branches = ["main", "master"]
+protected_paths = [".env", ".env.local", ".git", "id_rsa", "secrets.toml", "credentials.json"]
+deny_commands = ["git push --force", "cargo publish", "npm publish", "rm -rf /"]
 ```
 
-### 프로젝트 지시사항
+지원 placeholder:
 
-Wisp는 지시사항 파일을 자동으로 불러와 모든 에이전트 프롬프트에 주입합니다:
+- `{prompt}`
+- `{prompt_file}`
+- `{session_dir}`
+- `{task}`
 
-| 파일 | 용도 |
-|---|---|
-| `.wisp/instructions.md` | 일반 프로젝트 컨텍스트 |
-| `WISP.md` | Wisp 전용 가이드 |
-| `AGENTS.md` / `AGENT.md` | 에이전트 행동 규칙 |
-| `CLAUDE.md` | Claude 전용 규칙 |
-| `CODEX.md` | Codex 전용 규칙 |
+`input = "arg"`가 기본값이고, `input = "file"`도 지원한다.
 
----
+## Session Layout
 
-## 안전 원칙
+실행마다 다음과 같은 디렉터리가 생긴다.
 
-> Wisp는 기본적으로 안전하게 설계되어 있습니다.
+```text
+.wisp/sessions/20260619-143000/
+  task.original.txt
+  task.normalized.en.md
+  instructions.loaded.md
+  prompts/
+  outputs/
+  git/
+  summary.md
+```
 
-- **승인 없이 push 불가** — `push = "always"`로 무감독 푸시 차단
-- **위험 명령어 차단** — `git push --force`, `rm -rf /` 등 정책으로 금지
-- **보호 파일 절대 수정 불가** — `.env`, `.git`, `id_rsa` 등
-- **에이전트 의견 불일치 시 사용자에게 에스컬레이션** — Wisp는 임의로 선택하지 않음
-- **내부 프롬프트는 항상 영어** — 사용자 메시지는 언어 자동 감지 후 현지화
+single-agent 실행도 direct prompt, output, meta, before/after git snapshot을 같이 저장한다.
 
----
+## PowerShell 예시
 
-## npm 래퍼 동작 방식
-
-`npm/bin/wisp.js`는 순수 프로세스 래퍼입니다:
-
-1. 플랫폼 감지 (`win32` → `wisp.exe`, 기타 → `wisp`)
-2. `npm/dist/`에서 바이너리 경로 확인
-3. `stdio: 'inherit'`으로 실행, 종료 코드 그대로 전달
-
-실제 모든 로직은 Rust 바이너리 안에 있습니다.
-
----
-
-## 라이선스
-
-MIT
+```powershell
+wisp ask claude "이 코드 리뷰해줘" --execute-agents
+wisp ask codex "테스트 추가해줘" --execute-agents
+wisp ask codex "리팩토링해줘" --execute-agents --permission auto
+wisp ask codex "분석만 해줘" --permission skip
+```

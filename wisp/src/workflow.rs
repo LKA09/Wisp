@@ -1,72 +1,61 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::time::Instant;
 
-use crate::agent::{AgentConfig as RunnerConfig, DryRunRunner, SubprocessRunner};
+use crate::agent::{
+    AgentOutput, AgentRunOptions, DryRunRunner, PermissionMode, SubprocessRunner, prepare_command,
+    resolve_input_mode,
+};
 use crate::config::Config;
 use crate::display;
 use crate::git::{self, GitSnapshot};
-use crate::instructions::{load_instructions, LoadedInstructions};
-use crate::language::{msg, Language};
-use crate::policy;
+use crate::instructions::{LoadedInstructions, load_instructions};
+use crate::language::{Language, msg};
+use crate::policy::{self, ApprovalDecision};
 use crate::session::Session;
 
 pub struct SummonArgs {
     pub task: String,
     pub execute_agents: bool,
     pub allow_dirty: bool,
+    pub permission_mode: PermissionMode,
     pub lang: Language,
 }
 
-struct WorkflowStep<'a> {
-    agent: &'a str,
-    role: &'a str,
-    prompt: &'a str,
-    out_file: &'a str,
-    meta_file: &'a str,
+pub struct SingleAgentArgs {
+    pub agent: String,
+    pub task: String,
+    pub execute_agents: bool,
+    pub allow_dirty: bool,
+    pub permission_mode: PermissionMode,
+    pub lang: Language,
+}
+
+struct WorkflowStep {
+    agent: String,
+    role: &'static str,
+    prompt: String,
+    prompt_file: String,
+    out_file: &'static str,
+    meta_file: &'static str,
 }
 
 pub fn summon(args: SummonArgs) -> Result<()> {
-    let lang = &args.lang;
     let config = Config::load()?;
     validate_workflow_agents(&config)?;
-
-    if args.execute_agents && !args.allow_dirty && !git::working_tree_clean()? {
-        bail!(msg(
-            lang,
-            "Working tree has uncommitted changes. Re-run with --allow-dirty to proceed.",
-            "작업 트리에 커밋되지 않은 변경이 있습니다. 계속하려면 --allow-dirty를 명시하세요."
-        ));
-    }
-
-    let branch = git::current_branch()?
-        .unwrap_or_else(|| "unknown".to_string());
-    if args.execute_agents && policy::is_protected_branch(&branch, &config) {
-        bail!(msg(
-            lang,
-            &format!(
-                "Refusing to execute agents on protected branch `{branch}`. Create a work branch first."
-            ),
-            &format!(
-                "보호 브랜치 `{branch}`에서는 실제 agent 실행을 막습니다. 작업 브랜치를 만든 뒤 다시 실행하세요."
-            )
-        ));
-    }
+    let branch =
+        validate_execute_preconditions(&config, args.execute_agents, args.allow_dirty, &args.lang)?;
 
     let instructions = load_instructions(&config);
-    let mode = if args.execute_agents { "execute" } else { "dry-run" };
-
-    display::header(&args.task, &branch, mode, instructions.files.len());
+    let mode = mode_label(args.execute_agents, args.permission_mode);
+    display::header(&args.task, &branch, &mode, instructions.files.len());
 
     let session = Session::create()?;
     let initial_snapshot = git::snapshot().context("Failed to capture initial git snapshot")?;
     write_snapshot(&session, "git/before", &initial_snapshot)?;
 
-    let normalized_task_en = normalize_task_en(&args.task, lang);
+    let normalized_task_en = normalize_task_en(&args.task, &args.lang);
     let instructions_text = instructions.combined();
-    let implement_prompt = build_implement_prompt(&normalized_task_en, &args.task, &instructions_text);
-    let patch_prompt = build_patch_prompt(&normalized_task_en, &args.task, &instructions_text);
-    let review_prompt = build_review_prompt(&normalized_task_en, &args.task);
-    let ship_prompt = build_ship_prompt(&normalized_task_en, &args.task);
+    let steps = build_workflow_steps(&config, &normalized_task_en, &args.task, &instructions_text);
 
     session.write("task.original.txt", &args.task)?;
     session.write(
@@ -77,54 +66,65 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         "instructions.loaded.md",
         &format!("# Loaded Project Instructions\n\n{}", instructions_text),
     )?;
-    session.write("prompts/implementer.en.md", &implement_prompt)?;
-    session.write("prompts/patcher.en.md", &patch_prompt)?;
-    session.write("prompts/reviewer.en.md", &review_prompt)?;
-    session.write("prompts/shipper.en.md", &ship_prompt)?;
 
-    let steps = build_steps(
-        &config,
-        &implement_prompt,
-        &patch_prompt,
-        &review_prompt,
-        &ship_prompt,
-    );
     let cwd = std::env::current_dir()?;
     let total = steps.len();
 
     for (i, step) in steps.iter().enumerate() {
+        session.write(&step.prompt_file, &step.prompt)?;
+
         if i > 0 {
-            let prev_agent = steps[i - 1].agent;
-            let handoff = handoff_note(prev_agent, step.agent, step.role, lang);
-            display::wisp_note(&handoff);
+            let prev_agent = steps[i - 1].agent.as_str();
+            display::wisp_note(&handoff_note(
+                prev_agent,
+                step.agent.as_str(),
+                step.role,
+                &args.lang,
+            ));
         }
 
-        display::agent_start(step.agent, step.role, i + 1, total);
-
+        display::agent_start(step.agent.as_str(), step.role, i + 1, total);
         let cfg = config
             .agents
-            .get(step.agent)
+            .get(step.agent.as_str())
             .with_context(|| format!("Agent `{}` is not configured.", step.agent))?;
 
-        let command_preview = format!("{} {}", cfg.cmd, cfg.args.join(" ")).trim().to_string();
+        let prompt_path = session.path().join(&step.prompt_file);
+        let prepared = prepare_command(
+            cfg,
+            step.agent.as_str(),
+            &args.task,
+            session.path(),
+            &step.prompt,
+            &prompt_path,
+            args.permission_mode,
+        );
+        let command_preview = format!("{} {}", prepared.cmd, prepared.args.join(" "));
         if policy::is_denied_command(&command_preview, &config) {
-            bail!(format!("Configured agent command is denied by policy: {command_preview}"));
+            bail!(format!(
+                "Configured agent command is denied by policy: {command_preview}"
+            ));
         }
-
-        let runner_cfg = RunnerConfig {
-            name: step.agent.to_string(),
-            cmd: cfg.cmd.clone(),
-            args: cfg.args.clone(),
-        };
 
         let before_step = git::snapshot().context("Failed to capture pre-step git snapshot")?;
         let started = Instant::now();
-
-        let (ok, output) = if args.execute_agents {
-            run_agent_with_streaming(step, &runner_cfg, &cwd)
+        let output = if args.execute_agents {
+            run_agent_with_streaming(
+                &prepared,
+                resolve_input_mode(&cfg.input),
+                args.permission_mode,
+                &cwd,
+            )
         } else {
-            let runner = DryRunRunner { config: runner_cfg };
-            (true, runner.display_and_capture(step.prompt))
+            DryRunRunner {
+                options: AgentRunOptions {
+                    permission_mode: args.permission_mode,
+                    input_mode: resolve_input_mode(&cfg.input),
+                    capture_output: true,
+                    stream_output: true,
+                },
+            }
+            .display_and_capture(&prepared, &step.prompt)
         };
 
         let duration_ms = started.elapsed().as_millis();
@@ -136,23 +136,18 @@ pub fn summon(args: SummonArgs) -> Result<()> {
             Vec::new()
         };
 
-        display::agent_end(step.agent, ok && violations.is_empty());
-
-        let content = format!(
-            "# {} → {} Output\n\nExit status: {}\n\n## stdout\n\n{}\n\n## stderr\n\n{}\n",
-            display::agent_display(step.agent),
-            step.role,
-            output.status,
-            output.stdout,
-            output.stderr
-        );
-        session.write(step.out_file, &content)?;
+        session.write(
+            step.out_file,
+            &format_agent_output(step.agent.as_str(), step.role, &output),
+        )?;
         session.write(
             step.meta_file,
             &format_step_meta(
-                step,
+                step.role,
+                step.agent.as_str(),
                 &command_preview,
-                output.status,
+                &prompt_path.display().to_string(),
+                &output,
                 duration_ms,
                 &before_step,
                 &after_step,
@@ -161,25 +156,171 @@ pub fn summon(args: SummonArgs) -> Result<()> {
             ),
         )?;
 
-        if !violations.is_empty() {
-            bail!(format_policy_violation_error(step, &violations, lang));
+        match handle_policy_violations(
+            &violations,
+            &config,
+            &args.lang,
+            step.agent.as_str(),
+            step.role,
+        )? {
+            true => display::agent_end(step.agent.as_str(), output.status == 0),
+            false => {
+                display::agent_end(step.agent.as_str(), false);
+                bail!(format_policy_violation_error(
+                    step.agent.as_str(),
+                    step.role,
+                    &violations,
+                    &args.lang
+                ));
+            }
         }
     }
 
-    let final_snapshot = git::snapshot().context("Failed to capture final git snapshot")?;
-    write_snapshot(&session, "git/after", &final_snapshot)?;
-
-    let summary = build_summary(
+    finalize_workflow_summary(
+        &session,
         &args.task,
         &normalized_task_en,
         &branch,
-        mode,
-        &session,
+        &mode,
         &instructions,
         &config,
-    );
-    session.write("summary.md", &summary)?;
+    )?;
+    display::finish(&session.path().display().to_string(), !args.execute_agents);
+    Ok(())
+}
 
+pub fn run_single_agent(args: SingleAgentArgs) -> Result<()> {
+    let config = Config::load()?;
+    let branch =
+        validate_execute_preconditions(&config, args.execute_agents, args.allow_dirty, &args.lang)?;
+
+    let agent_cfg = config
+        .agents
+        .get(&args.agent)
+        .with_context(|| format!("Agent `{}` is not configured.", args.agent))?;
+    let instructions = load_instructions(&config);
+    let mode = mode_label(args.execute_agents, args.permission_mode);
+    display::header(
+        &args.task,
+        &branch,
+        &format!("single-agent {mode}"),
+        instructions.files.len(),
+    );
+
+    let session = Session::create()?;
+    let initial_snapshot = git::snapshot().context("Failed to capture initial git snapshot")?;
+    write_snapshot(&session, "git/before", &initial_snapshot)?;
+
+    let normalized_task_en = normalize_task_en(&args.task, &args.lang);
+    let instructions_text = instructions.combined();
+    let prompt = build_direct_agent_prompt(
+        &args.agent,
+        &normalized_task_en,
+        &args.task,
+        &instructions_text,
+    );
+    let prompt_file = format!("prompts/{}.md", args.agent);
+    session.write("task.original.txt", &args.task)?;
+    session.write(
+        "task.normalized.en.md",
+        &format!("# Normalized Task (English)\n\n{}\n", normalized_task_en),
+    )?;
+    session.write(
+        "instructions.loaded.md",
+        &format!("# Loaded Project Instructions\n\n{}", instructions_text),
+    )?;
+    session.write(&prompt_file, &prompt)?;
+
+    let prompt_path = session.path().join(&prompt_file);
+    let prepared = prepare_command(
+        agent_cfg,
+        &args.agent,
+        &args.task,
+        session.path(),
+        &prompt,
+        &prompt_path,
+        args.permission_mode,
+    );
+    let command_preview = format!("{} {}", prepared.cmd, prepared.args.join(" "));
+    if policy::is_denied_command(&command_preview, &config) {
+        bail!(format!(
+            "Configured agent command is denied by policy: {command_preview}"
+        ));
+    }
+
+    display::agent_start(&args.agent, "direct", 1, 1);
+    let cwd = std::env::current_dir()?;
+    let before_step = git::snapshot().context("Failed to capture pre-step git snapshot")?;
+    let started = Instant::now();
+    let output = if args.execute_agents {
+        run_agent_with_streaming(
+            &prepared,
+            resolve_input_mode(&agent_cfg.input),
+            args.permission_mode,
+            &cwd,
+        )
+    } else {
+        DryRunRunner {
+            options: AgentRunOptions {
+                permission_mode: args.permission_mode,
+                input_mode: resolve_input_mode(&agent_cfg.input),
+                capture_output: true,
+                stream_output: true,
+            },
+        }
+        .display_and_capture(&prepared, &prompt)
+    };
+    let duration_ms = started.elapsed().as_millis();
+    let after_step = git::snapshot().context("Failed to capture post-step git snapshot")?;
+    let delta_entries = git::delta_status_entries(&before_step, &after_step);
+    let violations = if args.execute_agents {
+        policy::evaluate_snapshot_delta(&before_step, &after_step, &delta_entries, &config)
+    } else {
+        Vec::new()
+    };
+
+    session.write(
+        "outputs/direct.out.md",
+        &format_agent_output(&args.agent, "direct", &output),
+    )?;
+    session.write(
+        "outputs/direct.meta.txt",
+        &format_step_meta(
+            "direct",
+            &args.agent,
+            &command_preview,
+            &prompt_path.display().to_string(),
+            &output,
+            duration_ms,
+            &before_step,
+            &after_step,
+            &delta_entries,
+            &violations,
+        ),
+    )?;
+
+    match handle_policy_violations(&violations, &config, &args.lang, &args.agent, "direct")? {
+        true => display::agent_end(&args.agent, output.status == 0),
+        false => {
+            display::agent_end(&args.agent, false);
+            bail!(format_policy_violation_error(
+                &args.agent,
+                "direct",
+                &violations,
+                &args.lang,
+            ));
+        }
+    }
+
+    finalize_single_agent_summary(
+        &session,
+        &args.task,
+        &normalized_task_en,
+        &branch,
+        &mode,
+        &instructions,
+        &args.agent,
+    )?;
     display::finish(&session.path().display().to_string(), !args.execute_agents);
     Ok(())
 }
@@ -201,39 +342,72 @@ fn validate_workflow_agents(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn build_steps<'a>(
-    config: &'a Config,
-    implement_prompt: &'a str,
-    patch_prompt: &'a str,
-    review_prompt: &'a str,
-    ship_prompt: &'a str,
-) -> Vec<WorkflowStep<'a>> {
+fn validate_execute_preconditions(
+    config: &Config,
+    execute_agents: bool,
+    allow_dirty: bool,
+    lang: &Language,
+) -> Result<String> {
+    if execute_agents && !allow_dirty && !git::working_tree_clean()? {
+        bail!(msg(
+            lang,
+            "Working tree has uncommitted changes. Re-run with --allow-dirty to proceed.",
+            "?묒뾽 ?몃━??而ㅻ컠?섏? ?딆? 蹂寃쎌씠 ?덉뒿?덈떎. 怨꾩냽?섎젮硫?--allow-dirty瑜?紐낆떆?섏꽭??"
+        ));
+    }
+
+    let branch = git::current_branch()?.unwrap_or_else(|| "unknown".to_string());
+    if execute_agents && policy::is_protected_branch(&branch, config) {
+        bail!(msg(
+            lang,
+            &format!(
+                "Refusing to execute agents on protected branch `{branch}`. Create a work branch first."
+            ),
+            &format!(
+                "蹂댄샇 釉뚮옖移?`{branch}`?먯꽌???ㅼ젣 agent ?ㅽ뻾??留됱뒿?덈떎. ?묒뾽 釉뚮옖移섎? 留뚮뱺 ???ㅼ떆 ?ㅽ뻾?섏꽭??"
+            )
+        ));
+    }
+
+    Ok(branch)
+}
+
+fn build_workflow_steps(
+    config: &Config,
+    normalized_task_en: &str,
+    original_task: &str,
+    instructions: &str,
+) -> Vec<WorkflowStep> {
     vec![
         WorkflowStep {
-            agent: config.workflow.implementer.as_str(),
+            agent: config.workflow.implementer.clone(),
             role: "implement",
-            prompt: implement_prompt,
+            prompt: build_implement_prompt(normalized_task_en, original_task, instructions),
+            prompt_file: "prompts/implementer.en.md".into(),
             out_file: "outputs/implement.out.md",
             meta_file: "outputs/implement.meta.txt",
         },
         WorkflowStep {
-            agent: config.workflow.patcher.as_str(),
+            agent: config.workflow.patcher.clone(),
             role: "patch",
-            prompt: patch_prompt,
+            prompt: build_patch_prompt(normalized_task_en, original_task, instructions),
+            prompt_file: "prompts/patcher.en.md".into(),
             out_file: "outputs/patch.out.md",
             meta_file: "outputs/patch.meta.txt",
         },
         WorkflowStep {
-            agent: config.workflow.reviewer.as_str(),
+            agent: config.workflow.reviewer.clone(),
             role: "review",
-            prompt: review_prompt,
+            prompt: build_review_prompt(normalized_task_en, original_task),
+            prompt_file: "prompts/reviewer.en.md".into(),
             out_file: "outputs/review.out.md",
             meta_file: "outputs/review.meta.txt",
         },
         WorkflowStep {
-            agent: config.workflow.shipper.as_str(),
+            agent: config.workflow.shipper.clone(),
             role: "ship",
-            prompt: ship_prompt,
+            prompt: build_ship_prompt(normalized_task_en, original_task),
+            prompt_file: "prompts/shipper.en.md".into(),
             out_file: "outputs/ship.out.md",
             meta_file: "outputs/ship.meta.txt",
         },
@@ -241,18 +415,24 @@ fn build_steps<'a>(
 }
 
 fn run_agent_with_streaming(
-    step: &WorkflowStep<'_>,
-    runner_cfg: &RunnerConfig,
+    prepared: &crate::agent::PreparedAgentCommand,
+    input_mode: crate::agent::AgentInputMode,
+    permission_mode: PermissionMode,
     cwd: &std::path::Path,
-) -> (bool, crate::agent::AgentOutput) {
+) -> AgentOutput {
     let runner = SubprocessRunner {
-        config: runner_cfg.clone(),
+        options: AgentRunOptions {
+            permission_mode,
+            input_mode,
+            capture_output: true,
+            stream_output: true,
+        },
     };
     let mut spinner = display::ThinkingSpinner::start();
     let mut at_line_start = true;
     let mut first_chunk = true;
 
-    let result = runner.run_streaming(step.prompt, cwd, |chunk| {
+    let result = runner.run_streaming(prepared, cwd, |chunk| {
         use std::io::Write;
         if first_chunk {
             spinner.stop();
@@ -261,7 +441,7 @@ fn run_agent_with_streaming(
 
         for ch in chunk.chars() {
             if at_line_start {
-                print!("  │  ");
+                print!("  > ");
                 at_line_start = false;
             }
             match ch {
@@ -289,18 +469,15 @@ fn run_agent_with_streaming(
                     display::agent_line(&format!("\x1b[90m[stderr] {line}\x1b[0m"));
                 }
             }
-            (out.status == 0, out)
+            out
         }
         Err(e) => {
             display::agent_line(&format!("\x1b[91merror: {e}\x1b[0m"));
-            (
-                false,
-                crate::agent::AgentOutput {
-                    status: -1,
-                    stdout: String::new(),
-                    stderr: e.to_string(),
-                },
-            )
+            AgentOutput {
+                status: -1,
+                stdout: String::new(),
+                stderr: e.to_string(),
+            }
         }
     }
 }
@@ -308,13 +485,22 @@ fn run_agent_with_streaming(
 fn write_snapshot(session: &Session, prefix: &str, snapshot: &GitSnapshot) -> Result<()> {
     session.write(
         &format!("{prefix}/head.txt"),
-        &snapshot.head.clone().unwrap_or_else(|| "unknown".to_string()),
+        &snapshot
+            .head
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
     )?;
     session.write(
         &format!("{prefix}/branch.txt"),
-        &snapshot.branch.clone().unwrap_or_else(|| "unknown".to_string()),
+        &snapshot
+            .branch
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
     )?;
-    session.write(&format!("{prefix}/status.porcelain.txt"), &snapshot.status_raw)?;
+    session.write(
+        &format!("{prefix}/status.porcelain.txt"),
+        &snapshot.status_raw,
+    )?;
     session.write(
         &format!("{prefix}/diff.name-status.txt"),
         &snapshot.diff_name_status,
@@ -322,10 +508,65 @@ fn write_snapshot(session: &Session, prefix: &str, snapshot: &GitSnapshot) -> Re
     Ok(())
 }
 
+fn handle_policy_violations(
+    violations: &[policy::PolicyViolation],
+    config: &Config,
+    lang: &Language,
+    agent: &str,
+    role: &str,
+) -> Result<bool> {
+    use std::io::{self, Write};
+
+    for violation in violations {
+        match policy::approval_decision(&violation.event, config) {
+            ApprovalDecision::Allow => {}
+            ApprovalDecision::Deny => return Ok(false),
+            ApprovalDecision::Ask => {
+                println!();
+                println!(
+                    "  Approval required for {} ({}): {}",
+                    display::agent_display(agent),
+                    role,
+                    violation.message
+                );
+                print!(
+                    "  Continue this session? [{}] ",
+                    match lang {
+                        Language::Korean => "y/N",
+                        Language::English => "y/N",
+                    }
+                );
+                io::stdout().flush().ok();
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).ok();
+                let answer = input.trim().to_ascii_lowercase();
+                if answer != "y" && answer != "yes" {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+
+    Ok(true)
+}
+
+fn format_agent_output(agent: &str, role: &str, output: &AgentOutput) -> String {
+    format!(
+        "# {} ({}) Output\n\nExit status: {}\n\n## stdout\n\n{}\n\n## stderr\n\n{}\n",
+        display::agent_display(agent),
+        role,
+        output.status,
+        output.stdout,
+        output.stderr
+    )
+}
+
 fn format_step_meta(
-    step: &WorkflowStep<'_>,
+    role: &str,
+    agent: &str,
     command_preview: &str,
-    exit_code: i32,
+    prompt_file: &str,
+    output: &AgentOutput,
     duration_ms: u128,
     before: &GitSnapshot,
     after: &GitSnapshot,
@@ -358,12 +599,8 @@ fn format_step_meta(
     };
 
     format!(
-        "role={}\nagent={}\ncommand={}\nexit_code={}\nduration_ms={}\nbranch_before={}\nbranch_after={}\nhead_before={}\nhead_after={}\nchanged_files=\n{}\n\npolicy_violations=\n{}\n",
-        step.role,
-        step.agent,
-        command_preview,
-        exit_code,
-        duration_ms,
+        "role={role}\nagent={agent}\ncommand={command_preview}\nprompt_file={prompt_file}\nexit_code={}\nduration_ms={duration_ms}\nbranch_before={}\nbranch_after={}\nhead_before={}\nhead_after={}\nchanged_files=\n{}\n\npolicy_violations=\n{}\n",
+        output.status,
         before.branch.as_deref().unwrap_or("unknown"),
         after.branch.as_deref().unwrap_or("unknown"),
         before.head.as_deref().unwrap_or("unknown"),
@@ -374,7 +611,8 @@ fn format_step_meta(
 }
 
 fn format_policy_violation_error(
-    step: &WorkflowStep<'_>,
+    agent: &str,
+    role: &str,
     violations: &[policy::PolicyViolation],
     lang: &Language,
 ) -> String {
@@ -388,14 +626,14 @@ fn format_policy_violation_error(
         lang,
         &format!(
             "Policy blocked {} ({}) after execution: {}",
-            display::agent_display(step.agent),
-            step.role,
+            display::agent_display(agent),
+            role,
             details
         ),
         &format!(
-            "정책 위반으로 {} ({}) 단계 실행 후 중단했습니다: {}",
-            display::agent_display(step.agent),
-            step.role,
+            "?뺤콉 ?꾨컲?쇰줈 {} ({}) ?④퀎 ?ㅽ뻾 ??以묐떒?덉뒿?덈떎: {}",
+            display::agent_display(agent),
+            role,
             details
         ),
     )
@@ -420,7 +658,38 @@ fn normalize_task_en(task: &str, lang: &Language) -> String {
     }
 }
 
-fn build_implement_prompt(normalized_task_en: &str, original_task: &str, instructions: &str) -> String {
+fn build_direct_agent_prompt(
+    agent: &str,
+    normalized_task_en: &str,
+    original_task: &str,
+    instructions_text: &str,
+) -> String {
+    format!(
+        r#"You are running as a direct single-agent session in Wisp.
+
+Agent: {agent}
+Task: {normalized_task_en}
+Original user input: {original_task}
+
+Project instructions:
+{instructions_text}
+
+Rules:
+- Do not hand off to another agent.
+- If you need permission, ask the user directly in the terminal.
+- Make minimal safe changes.
+- Explain what you changed.
+- Do not push.
+- Do not commit unless the user explicitly approves it.
+"#
+    )
+}
+
+fn build_implement_prompt(
+    normalized_task_en: &str,
+    original_task: &str,
+    instructions: &str,
+) -> String {
     format!(
         r#"You are the implementer for Wisp.
 
@@ -446,12 +715,7 @@ Rules:
 - Do not push.
 - Do not add dependencies without user approval.
 - Do not modify protected files.
-- If requirements are ambiguous or risky, stop and request a user decision.
-
-Output:
-- Summary
-- Changed files
-- Any required user decisions
+- If requirements are ambiguous or risky, stop and request a user decision in the terminal.
 "#,
         normalized_task_en, original_task, instructions
     )
@@ -477,12 +741,7 @@ Rules:
 - Do not commit.
 - Do not push.
 - Do not add dependencies without user approval.
-- If the next action is unclear, request a user decision.
-
-Output:
-- Patch summary
-- Changed files
-- Any required user decisions
+- If the next action is unclear, request a user decision in the terminal.
 "#,
         normalized_task_en, original_task, instructions
     )
@@ -530,56 +789,78 @@ Rules:
 - Do not push.
 - The orchestrator must ask the user before commit or push.
 - Keep the commit message concise and conventional.
-
-Output:
-- Final summary
-- Suggested commit message
-- Push readiness checklist
 "#,
         normalized_task_en, original_task
     )
 }
 
-fn build_summary(
-    original_task: &str,
+fn finalize_workflow_summary(
+    session: &Session,
+    task: &str,
     normalized_task_en: &str,
     branch: &str,
     mode: &str,
-    session: &Session,
     instructions: &LoadedInstructions,
     config: &Config,
-) -> String {
-    format!(
-        "# Wisp Session Summary\n\n\
-         ## Task\n\n\
-         **Original:** {}\n\n\
-         **Normalized (EN):** {}\n\n\
-         ## Context\n\n\
-         - Branch: {}\n\
-         - Mode: {}\n\
-         - Session: {}\n\
-         - Instruction files loaded: {} ({} bytes{})\n\n\
-         ## Workflow\n\n\
-         1. {} → implement\n\
-         2. {} → patch\n\
-         3. {} → review\n\
-         4. {} → ship\n\n\
-         ## Runtime Safety\n\n\
-         - Interactive mode defaults to dry-run.\n\
-         - Dirty working tree blocks execution unless --allow-dirty is set.\n\
-         - Protected branches block --execute-agents.\n\
-         - Post-step git snapshots are audited for commits, protected files, dependency files, and deletions.\n",
-        original_task,
-        normalized_task_en,
-        branch,
-        mode,
-        session.path().display(),
-        instructions.files.len(),
-        instructions.total_bytes,
-        if instructions.truncated { ", truncated" } else { "" },
-        config.workflow.implementer,
-        config.workflow.patcher,
-        config.workflow.reviewer,
-        config.workflow.shipper,
+) -> Result<()> {
+    let final_snapshot = git::snapshot().context("Failed to capture final git snapshot")?;
+    write_snapshot(session, "git/after", &final_snapshot)?;
+    session.write(
+        "summary.md",
+        &format!(
+            "# Wisp Session Summary\n\n## Task\n\nOriginal: {}\n\nNormalized: {}\n\n## Context\n\n- Branch: {}\n- Mode: {}\n- Session: {}\n- Instructions loaded: {} ({} bytes{})\n\n## Workflow\n\n1. {} implement\n2. {} patch\n3. {} review\n4. {} ship\n\n## Runtime Safety\n\n- Default interactive behavior is dry-run.\n- Protected branches block execution.\n- Dirty working tree blocks execution unless --allow-dirty is set.\n- Policy checks record changed files, HEAD movement, deletions, dependency changes, and protected path changes.\n",
+            task,
+            normalized_task_en,
+            branch,
+            mode,
+            session.path().display(),
+            instructions.files.len(),
+            instructions.total_bytes,
+            if instructions.truncated { ", truncated" } else { "" },
+            config.workflow.implementer,
+            config.workflow.patcher,
+            config.workflow.reviewer,
+            config.workflow.shipper,
+        ),
     )
+}
+
+fn finalize_single_agent_summary(
+    session: &Session,
+    task: &str,
+    normalized_task_en: &str,
+    branch: &str,
+    mode: &str,
+    instructions: &LoadedInstructions,
+    agent: &str,
+) -> Result<()> {
+    let final_snapshot = git::snapshot().context("Failed to capture final git snapshot")?;
+    write_snapshot(session, "git/after", &final_snapshot)?;
+    session.write(
+        "summary.md",
+        &format!(
+            "# Wisp Single Agent Summary\n\n## Task\n\nOriginal: {}\n\nNormalized: {}\n\n## Context\n\n- Agent: {}\n- Branch: {}\n- Mode: {}\n- Session: {}\n- Instructions loaded: {} ({} bytes{})\n",
+            task,
+            normalized_task_en,
+            agent,
+            branch,
+            mode,
+            session.path().display(),
+            instructions.files.len(),
+            instructions.total_bytes,
+            if instructions.truncated { ", truncated" } else { "" },
+        ),
+    )
+}
+
+fn mode_label(execute_agents: bool, permission_mode: PermissionMode) -> String {
+    if !execute_agents {
+        return "dry-run".to_string();
+    }
+
+    match permission_mode {
+        PermissionMode::Interactive => "execute-interactive".to_string(),
+        PermissionMode::Auto => "execute-auto".to_string(),
+        PermissionMode::Skip => "execute-skip".to_string(),
+    }
 }

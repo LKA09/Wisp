@@ -1,284 +1,133 @@
-<div align="center">
+# Wisp
 
-# ✦ Wisp
+Wisp is a local coding agent orchestrator for Claude CLI and Codex CLI. It keeps an audit trail in `.wisp/sessions/` and defaults to safe dry-run behavior.
 
-**A local personal coding agent orchestrator.**
+## Safety Defaults
 
-*Claude implements. Codex ships. You stay in control.*
+- Default mode is safe dry-run.
+- Interactive execution is blocked on protected branches.
+- Execution is blocked on a dirty working tree unless `--allow-dirty` is set.
+- Session logs include prompts, outputs, metadata, and git snapshots.
+- Review the git diff before committing.
+- Do not run `--execute-agents` on important branches. Use a feature branch.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org/)
-[![MVP](https://img.shields.io/badge/status-MVP-yellow.svg)]()
+## Interactive Mode
 
-[한국어](./README.ko.md)
+```text
+task              dry-run preview only
+!task             dry-run preview only
+~task             dry-run preview only
 
-</div>
+/run task         full workflow execute
+/exec task        full workflow execute
 
----
+!claude task      ask Claude only
+!codex task       ask Codex only
 
-## What is Wisp?
+/run claude task  execute Claude only
+/run codex task   execute Codex only
 
-Wisp sits between you and your AI coding tools. It coordinates two CLI agents in a structured, safe workflow:
+/auto task        execute workflow with auto permission mode
+/auto claude task execute Claude only with auto permission mode
+/auto codex task  execute Codex only with auto permission mode
+```
 
-| Agent | Role |
-|---|---|
-| **Claude CLI** | Implementer · Reviewer |
-| **Codex CLI** | Patcher · Shipper |
+`!claude` and `!codex` are direct single-agent sessions. They do not run the full implement/patch/review/ship workflow.
 
-Every run is logged locally. Nothing is committed or pushed without your explicit approval.
-
-> **MVP status** — Core structure, config, CLI, session logging, and workflow skeleton are all in place.
-> Real agent calls require `--execute-agents` and working Claude/Codex CLI installations.
-
----
-
-## Quickstart
+## CLI
 
 ```bash
-# 1. Build
-cd wisp && cargo build --release
-
-# 2. Initialize in your project
-cd your-project
 wisp init
-
-# 3. Check your environment
 wisp doctor
-
-# 4. Summon agents (dry-run by default — safe)
-wisp summon "add error handling to the auth module"
-```
-
----
-
-## Installation
-
-### npm (recommended)
-
-```bash
-npm install -g @lka09/wisp
-```
-
-The postinstall script automatically downloads the right binary for your platform from GitHub Releases.
-
-> **Agent CLIs** — Wisp works out of the box in dry-run mode. To actually run agents (`--execute-agents`), install both:
->
-> ```bash
-> npm install -g @anthropic-ai/claude-code   # Claude — implementer + reviewer
-> npm install -g @openai/codex               # Codex  — patcher + shipper
-> ```
-
-### Build from source
-
-Requires [Rust](https://rustup.rs/) 1.75+ and [Node.js](https://nodejs.org/) 16+.
-
-```bash
-git clone https://github.com/LKA09/Wisp
-cd Wisp
-npm run build          # compiles Rust + copies binary to npm/dist/
-npm run install:local  # build + npm link (makes `wisp` available globally)
-```
-
-Or step by step:
-
-```bash
-cd wisp && cargo build --release
-node npm/scripts/build.js   # copies binary to npm/dist/
-cd npm && npm link
-```
-
----
-
-## Commands
-
-### `wisp`
-
-```
-Wisp
-
-A local personal coding agent.
-
-Usage:
-  wisp init
-  wisp doctor
-  wisp summon "<task>"
-```
-
-### `wisp init`
-
-Scaffolds Wisp in the current directory.
-
-```
-Created wisp.toml
-Created .wisp/sessions/
-Created .wisp/instructions.md
-```
-
-```bash
-wisp init           # first-time setup
-wisp init --force   # overwrite existing wisp.toml
-```
-
-### `wisp doctor`
-
-Checks your environment and tells you exactly what to install.
-
-```
-Wisp Doctor
-
-  [OK  ] Git installed
-  [OK  ] Git repository
-  [FAIL] Claude CLI (claude)
-      Install: npm install -g @anthropic-ai/claude-code
-  [FAIL] Codex CLI (codex)
-      Install: npm install -g @openai/codex
-  [OK  ] wisp.toml exists
-  [OK  ] .wisp/sessions/ exists
-
-Note: Claude/Codex CLIs are optional for dry-run mode.
-```
-
-### `wisp summon "<task>"`
-
-The main command. Runs the full agent workflow for a task.
-
-```bash
-wisp summon "write tests for the parser"
-wisp summon "README 정리해줘"                     # Korean input → Korean output
-wisp summon "refactor auth" --allow-dirty         # skip clean working tree check
-wisp summon "refactor auth" --execute-agents      # invoke real agents
-```
-
-**Dry-run mode (default)** — safe, no side effects:
-
-- Detects task language (Korean → Korean UI output)
-- Loads `wisp.toml` and project instruction files
-- Generates English prompts for all four agent roles
-- Creates a timestamped session directory with prompts + placeholder outputs
-- Captures `git status` and `git diff`
-
-**`--execute-agents`** — actually calls Claude and Codex CLIs.
-
----
-
-## Agent Workflow
-
-```
 wisp summon "task"
-      │
-      ├─ 1. Claude  →  implement     (write the code)
-      ├─ 2. Codex   →  patch         (apply minimal fixes)
-      ├─ 3. Claude  →  review        (APPROVED / CHANGES_REQUESTED / NEEDS_USER_DECISION)
-      └─ 4. Codex   →  ship          (suggest commit message + push checklist)
-                                      ↑
-                              user approves before
-                              any commit or push
+wisp summon "task" --execute-agents
+wisp ask claude "task"
+wisp ask claude "task" --execute-agents
+wisp ask codex "task" --execute-agents --permission auto
+wisp ask codex "task" --permission skip
 ```
 
----
+## Permission Modes
 
-## Session Layout
+- `interactive`: user can approve prompts manually in the terminal.
+- `auto`: pass configured auto-approve args to the agent.
+- `skip`: avoid permission-requiring execution when possible.
 
-Every `wisp summon` creates a full audit trail:
-
-```
-.wisp/sessions/20260619-143000/
-├── task.original.txt           original task string
-├── task.normalized.en.md       English-normalized task
-├── instructions.loaded.md      loaded project instructions
-│
-├── prompts/
-│   ├── claude.implement.en.md
-│   ├── codex.patch.en.md
-│   ├── claude.review.en.md
-│   └── codex.ship.en.md
-│
-├── outputs/
-│   ├── claude.implement.out.md
-│   ├── codex.patch.out.md
-│   ├── claude.review.out.md
-│   └── codex.ship.out.md
-│
-├── git/
-│   ├── status.txt
-│   └── diff.patch
-│
-└── summary.md
-```
-
----
+Wisp no longer sends prompts by writing to child stdin and closing it as the default execution path. Prompts are stored in the session and passed by configured command arguments, while agent stdin stays attached to the user terminal. This lets Claude/Codex ask for Enter, `y`, or `n` during execution.
 
 ## Configuration
 
-`wisp.toml` is generated by `wisp init`. Edit it to suit your project.
+Example `wisp.toml`:
 
 ```toml
 [agents.claude]
-cmd  = "claude"
-args = ["-p"]
+cmd = "claude"
+args = ["-p", "{prompt}"]
+input = "arg"
+permission_interactive_args = []
+permission_auto_args = []
+permission_skip_args = []
 
 [agents.codex]
-cmd  = "codex"
-args = ["exec"]
+cmd = "codex"
+args = ["exec", "-s", "workspace-write", "{prompt}"]
+input = "arg"
+permission_interactive_args = []
+permission_auto_args = []
+permission_skip_args = []
 
 [workflow]
-implementer      = "claude"
-patcher          = "codex"
-reviewer         = "claude"
-shipper          = "codex"
+implementer = "claude"
+patcher = "codex"
+reviewer = "claude"
+shipper = "codex"
 max_review_rounds = 2
 
 [approval]
-push                       = "always"   # explicit approval required
-commit                     = "ask"
-add_dependency             = "ask"
-delete_file                = "ask"
-modify_protected_file      = "deny"
+push = "deny"
+commit = "ask"
+add_dependency = "ask"
+delete_file = "ask"
+modify_protected_file = "deny"
 continue_after_test_failure = "ask"
 
 [policy]
-protected_paths = [".env", ".git", "id_rsa", "secrets.toml", "credentials.json"]
-deny_commands   = ["git push --force", "rm -rf /", "cargo publish"]
+protected_branches = ["main", "master"]
+protected_paths = [".env", ".env.local", ".git", "id_rsa", "secrets.toml", "credentials.json"]
+deny_commands = ["git push --force", "cargo publish", "npm publish", "rm -rf /"]
 ```
 
-### Project instructions
+Supported placeholders in agent args:
 
-Wisp automatically loads instruction files and injects them into every agent prompt:
+- `{prompt}`
+- `{prompt_file}`
+- `{session_dir}`
+- `{task}`
 
-| File | Purpose |
-|---|---|
-| `.wisp/instructions.md` | General project context |
-| `WISP.md` | Wisp-specific guidance |
-| `AGENTS.md` / `AGENT.md` | Agent behavior rules |
-| `CLAUDE.md` | Claude-specific rules |
-| `CODEX.md` | Codex-specific rules |
+`input = "arg"` is the current default. `input = "file"` is also supported for prompt-file-based invocation.
 
----
+## Session Layout
 
-## Safety
+Each run creates a directory like:
 
-> Wisp is designed to be safe by default.
+```text
+.wisp/sessions/20260619-143000/
+  task.original.txt
+  task.normalized.en.md
+  instructions.loaded.md
+  prompts/
+  outputs/
+  git/
+  summary.md
+```
 
-- **No push without approval** — `push = "always"` blocks unsupervised pushes
-- **No dangerous commands** — `git push --force`, `rm -rf /` and others are policy-denied
-- **Protected files are never touched** — `.env`, `.git`, `id_rsa`, etc.
-- **Agent disagreements escalate to the user** — Wisp never silently picks a side
-- **Internal prompts are always English** — user-facing output is auto-localized
+Single-agent runs also store the direct prompt, output, metadata, and before/after git snapshots.
 
----
+## PowerShell Examples
 
-## How the npm Wrapper Works
-
-The `npm/bin/wisp.js` script is a thin shim — no logic, just process spawning:
-
-1. Detects platform (`win32` → `wisp.exe`, otherwise `wisp`)
-2. Resolves the binary path from `npm/dist/`
-3. Spawns it with `stdio: 'inherit'` and forwards the exit code
-
-All actual logic lives in the Rust binary.
-
----
-
-## License
-
-MIT
+```powershell
+wisp ask claude "이 코드 리뷰해줘" --execute-agents
+wisp ask codex "테스트 추가해줘" --execute-agents
+wisp ask codex "리팩토링해줘" --execute-agents --permission auto
+wisp ask codex "분석만 해줘" --permission skip
+```
