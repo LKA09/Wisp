@@ -1,6 +1,42 @@
 use anyhow::Result;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+
+/// Spawn an agent subprocess with the prompt fed via stdin.
+/// Stdin avoids Windows quoting issues with long, multi-line prompts.
+/// On Windows, npm CLIs are .cmd files and must run through `cmd /c`.
+fn spawn_cmd(cmd: &str, args: &[String], prompt: &str, cwd: &Path) -> Result<Child> {
+    use std::io::Write;
+
+    #[cfg(windows)]
+    let mut child = Command::new("cmd")
+        .arg("/c")
+        .arg(cmd)
+        .args(args)
+        .arg("-")          // tell the CLI to read prompt from stdin
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    #[cfg(not(windows))]
+    let mut child = Command::new(cmd)
+        .args(args)
+        .arg("-")
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    // Write prompt to stdin and close it so the CLI knows input is done.
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(prompt.as_bytes())?;
+    }
+
+    Ok(child)
+}
 
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -33,15 +69,8 @@ impl SubprocessRunner {
         mut on_line: F,
     ) -> Result<AgentOutput> {
         use std::io::{BufRead, BufReader, Read};
-        use std::process::Stdio;
 
-        let mut child = Command::new(&self.config.cmd)
-            .args(&self.config.args)
-            .arg(prompt)
-            .current_dir(cwd)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        let mut child = spawn_cmd(&self.config.cmd, &self.config.args, prompt, cwd)?;
 
         let stdout = child.stdout.take().expect("stdout piped");
         let stderr = child.stderr.take().expect("stderr piped");
@@ -72,6 +101,7 @@ impl AgentRunner for SubprocessRunner {
         self.run_streaming(prompt, cwd, |_| {})
     }
 }
+
 
 /// Dry-run: shows prompt preview in the conversation UI instead of invoking the agent.
 pub struct DryRunRunner {
