@@ -104,7 +104,6 @@ pub fn interactive_header() {
     thick_rule();
     println!();
     println!("  {}{}✦ Wisp{}  —  local coding agent", BOLD, MAG, RST);
-    println!();
     println!(
         "  {}Claude implements  ·  Codex ships  ·  you stay in control{}",
         GRAY, RST
@@ -115,7 +114,6 @@ pub fn interactive_header() {
     println!("  {}Type a task and press Enter — agents run for real.{}", GRAY, RST);
     println!("  {}Prefix with {}~{}{} for dry-run preview.  {}exit{}{} to quit.{}",
         GRAY, RST, BOLD, GRAY, RST, BOLD, GRAY, RST);
-    println!();
 }
 
 pub fn interactive_prompt() {
