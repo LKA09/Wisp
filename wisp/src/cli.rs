@@ -2,63 +2,19 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use rustyline::completion::{Completer, Pair};
-use rustyline::highlight::Highlighter;
-use rustyline::hint::Hinter;
-use rustyline::validate::Validator;
-use rustyline::{Context, Editor, Helper};
-
 use crate::config;
 use crate::git;
 use crate::language::{detect, msg};
 use crate::workflow::{summon as run_summon, SummonArgs};
 
 // ---------------------------------------------------------------------------
-// Readline helper — tab-completes /commands
-// ---------------------------------------------------------------------------
-
-const SLASH_COMMANDS: &[&str] = &["/help", "/exit", "/quit"];
-
-struct WispHelper;
-
-impl Completer for WispHelper {
-    type Candidate = Pair;
-
-    fn complete(
-        &self,
-        line: &str,
-        pos: usize,
-        _ctx: &Context<'_>,
-    ) -> rustyline::Result<(usize, Vec<Pair>)> {
-        if line.starts_with('/') {
-            let matches = SLASH_COMMANDS
-                .iter()
-                .filter(|cmd| cmd.starts_with(line))
-                .map(|cmd| Pair {
-                    display: cmd.to_string(),
-                    replacement: cmd.to_string(),
-                })
-                .collect();
-            Ok((0, matches))
-        } else {
-            Ok((pos, vec![]))
-        }
-    }
-}
-
-impl Helper for WispHelper {}
-impl Hinter for WispHelper {
-    type Hint = String;
-}
-impl Highlighter for WispHelper {}
-impl Validator for WispHelper {}
-
-// ---------------------------------------------------------------------------
 // wisp (no args) — interactive session
 // ---------------------------------------------------------------------------
 
 pub fn interactive() {
-    use crate::display; // noqa — used for header/help/goodbye/no_config_hint
+    use crate::display;
+    use crate::language::Language;
+    use std::io::{self, Write};
 
     // If wisp.toml doesn't exist, guide the user first.
     if !config::Config::exists() {
@@ -68,26 +24,22 @@ pub fn interactive() {
 
     display::interactive_header();
 
-    let mut rl = Editor::new().expect("readline init");
-    rl.set_helper(Some(WispHelper));
-
     loop {
-        let readline = rl.readline("  \x1b[95m✦\x1b[0m ");
-        let input = match readline {
-            Ok(line) => line,
-            Err(_) => {
-                display::goodbye();
-                break;
-            }
-        };
+        display::interactive_prompt();
+        io::stdout().flush().ok();
+
+        let mut input = String::new();
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => break, // EOF (Ctrl+D)
+            Err(_) => break,
+            Ok(_) => {}
+        }
 
         let task = input.trim();
 
         if task.is_empty() {
             continue;
         }
-
-        rl.add_history_entry(task).ok();
 
         match task {
             "exit" | "quit" | "q" | "/exit" | "/quit" => {
