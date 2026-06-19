@@ -56,7 +56,7 @@ wisp summon "add error handling to the auth module"
 ### npm (recommended)
 
 ```bash
-npm install -g @lir09/wisp
+npm install -g @lka09/wisp
 ```
 
 The postinstall script automatically downloads the right binary for your platform from GitHub Releases.
