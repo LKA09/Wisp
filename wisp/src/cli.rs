@@ -53,11 +53,12 @@ pub fn interactive() {
             _ => {}
         }
 
-        // Prefix `!` → execute-agents mode, otherwise dry-run.
-        let (task_str, execute) = if let Some(t) = task.strip_prefix('!') {
-            (t.trim(), true)
+        // Default: actually run agents.
+        // Prefix `~` → dry-run preview only.
+        let (task_str, execute) = if let Some(t) = task.strip_prefix('~') {
+            (t.trim(), false)
         } else {
-            (task, false)
+            (task, true)
         };
 
         if task_str.is_empty() {

@@ -85,7 +85,7 @@ args = ["-p"]
 
 [agents.codex]
 cmd = "codex"
-args = ["exec"]
+args = ["exec", "-s", "workspace-write"]
 
 [workflow]
 implementer = "claude"

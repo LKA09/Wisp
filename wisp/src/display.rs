@@ -109,8 +109,8 @@ pub fn interactive_header() {
     println!();
     thick_rule();
     println!();
-    println!("  {}Type a task and press Enter.{}", GRAY, RST);
-    println!("  {}Prefix with {}!{}{} to run real agents.  {}exit{}{} to quit.{}",
+    println!("  {}Type a task and press Enter — agents run for real.{}", GRAY, RST);
+    println!("  {}Prefix with {}~{}{} for dry-run preview.  {}exit{}{} to quit.{}",
         GRAY, RST, BOLD, GRAY, RST, BOLD, GRAY, RST);
     println!();
 }
@@ -122,8 +122,8 @@ pub fn interactive_prompt() {
 pub fn interactive_help() {
     println!();
     println!("  {}Commands:{}", BOLD, RST);
-    println!("  {}  <task>{}      dry-run — generates prompts, no agents invoked", GRAY, RST);
-    println!("  {}  !<task>{}     execute agents (Claude + Codex CLIs required)", GRAY, RST);
+    println!("  {}  <task>{}      run Claude + Codex agents for real", GRAY, RST);
+    println!("  {}  ~<task>{}     dry-run — preview prompts only, no agents invoked", GRAY, RST);
     println!("  {}  exit{}        quit Wisp", GRAY, RST);
     println!("  {}  help{}        show this", GRAY, RST);
     println!();
