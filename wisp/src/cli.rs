@@ -22,6 +22,9 @@ pub enum InteractiveAction {
         task: String,
         permission_mode: PermissionMode,
     },
+    PreviewCommands {
+        query: String,
+    },
     Help,
     Exit,
 }
@@ -30,10 +33,35 @@ pub fn parse_interactive_action(input: &str) -> InteractiveAction {
     let trimmed = input.trim();
 
     match trimmed {
-        "" => return InteractiveAction::Help,
+        "" => {
+            return InteractiveAction::PreviewCommands {
+                query: String::new(),
+            };
+        }
+        "/" => {
+            return InteractiveAction::PreviewCommands {
+                query: String::new(),
+            };
+        }
         "exit" | "quit" | "q" | "/exit" | "/quit" => return InteractiveAction::Exit,
-        "/help" | "help" => return InteractiveAction::Help,
+        "/help" | "/commands" | "help" => return InteractiveAction::Help,
         _ => {}
+    }
+
+    if let Some(task) = trimmed.strip_prefix("/claude ") {
+        return InteractiveAction::ExecuteSingleAgent {
+            agent: "claude".into(),
+            task: task.trim().into(),
+            permission_mode: PermissionMode::Interactive,
+        };
+    }
+
+    if let Some(task) = trimmed.strip_prefix("/codex ") {
+        return InteractiveAction::ExecuteSingleAgent {
+            agent: "codex".into(),
+            task: task.trim().into(),
+            permission_mode: PermissionMode::Interactive,
+        };
     }
 
     if let Some(task) = trimmed.strip_prefix("/run ") {
@@ -46,6 +74,12 @@ pub fn parse_interactive_action(input: &str) -> InteractiveAction {
 
     if let Some(task) = trimmed.strip_prefix("/auto ") {
         return parse_execute_command(task.trim(), PermissionMode::Auto);
+    }
+
+    if let Some(query) = trimmed.strip_prefix('/') {
+        return InteractiveAction::PreviewCommands {
+            query: query.trim().to_string(),
+        };
     }
 
     if let Some(task) = trimmed.strip_prefix("!claude ") {
@@ -106,8 +140,8 @@ fn parse_execute_command(task: &str, permission_mode: PermissionMode) -> Interac
 
 pub fn interactive() {
     use crate::display;
-    use std::io::{self, BufRead, Write};
     use std::sync::mpsc;
+    use std::time::Duration;
 
     if !config::Config::exists() {
         display::no_config_hint();
@@ -115,17 +149,137 @@ pub fn interactive() {
     }
 
     display::interactive_header();
-    let (tx, rx) = mpsc::channel::<String>();
 
+    // Resize watcher — polls terminal width every 100 ms.
+    let (resize_tx, resize_rx) = mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let mut last_w = display::term_width();
+        loop {
+            std::thread::sleep(Duration::from_millis(100));
+            let w = display::term_width();
+            if w != last_w {
+                last_w = w;
+                if resize_tx.send(()).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    // Prefer raw character-by-character input (enables live completions).
+    // Fall back to line-by-line reading when raw mode is unavailable.
+    if let Some(raw) = crate::input::RawConsole::new() {
+        interactive_raw(raw, resize_rx);
+    } else {
+        interactive_lines(resize_rx);
+    }
+}
+
+fn dispatch(trimmed: &str) -> bool {
+    use crate::display;
+    match parse_interactive_action(trimmed) {
+        InteractiveAction::Exit => {
+            display::goodbye();
+            return false;
+        }
+        InteractiveAction::PreviewCommands { query } => {
+            display::interactive_command_preview(&query);
+        }
+        InteractiveAction::Help => display::interactive_help(),
+        InteractiveAction::DryRunWorkflow { task } => {
+            run_summon_command(&task, false, false, PermissionMode::Interactive);
+        }
+        InteractiveAction::ExecuteWorkflow { task, permission_mode } => {
+            run_summon_command(&task, true, false, permission_mode);
+        }
+        InteractiveAction::ExecuteSingleAgent { agent, task, permission_mode } => {
+            run_single_agent_command(&agent, &task, true, false, permission_mode);
+        }
+    }
+    true
+}
+
+/// Raw-mode interactive loop: reads one character at a time and shows live
+/// command completions when the user types a `/` prefix.
+fn interactive_raw(
+    raw: crate::input::RawConsole,
+    resize_rx: std::sync::mpsc::Receiver<()>,
+) {
+    use crate::{display, input};
+    use std::time::Duration;
+
+    loop {
+        let Some(line) = read_raw_line(&raw, &resize_rx) else {
+            break;
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !dispatch(trimmed) {
+            break;
+        }
+    }
+}
+
+/// Read one logical line in raw mode, showing live completions as the user types.
+fn read_raw_line(
+    raw: &crate::input::RawConsole,
+    resize_rx: &std::sync::mpsc::Receiver<()>,
+) -> Option<String> {
+    use crate::{display, input};
+    use std::io::Write;
+    use std::time::Duration;
+
+    let mut buf = String::new();
+    display::redraw_prompt_with_completions(&buf);
+
+    loop {
+        // Handle pending resize events.
+        if resize_rx.try_recv().is_ok() {
+            display::on_resize();
+            display::redraw_prompt_with_completions(&buf);
+        }
+
+        match raw.try_read_key() {
+            Some(input::Key::Enter) => {
+                // Clear any completion box below and advance to the next line.
+                print!("\x1b[J\n");
+                std::io::stdout().flush().ok();
+                return Some(buf);
+            }
+            Some(input::Key::Backspace) => {
+                buf.pop();
+                display::redraw_prompt_with_completions(&buf);
+            }
+            Some(input::Key::Escape) => {
+                buf.clear();
+                display::redraw_prompt_with_completions(&buf);
+            }
+            Some(input::Key::Char(c)) => {
+                buf.push(c);
+                display::redraw_prompt_with_completions(&buf);
+            }
+            None => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+}
+
+/// Fallback line-by-line loop used when raw mode is unavailable.
+fn interactive_lines(resize_rx: std::sync::mpsc::Receiver<()>) {
+    use crate::display;
+    use std::io::{self, BufRead, Write};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel::<String>();
     std::thread::spawn(move || {
         let stdin = io::stdin();
         for line in stdin.lock().lines() {
             match line {
-                Ok(line) => {
-                    if tx.send(line).is_err() {
-                        break;
-                    }
-                }
+                Ok(l) => { if tx.send(l).is_err() { break; } }
                 Err(_) => break,
             }
         }
@@ -135,43 +289,42 @@ pub fn interactive() {
         display::interactive_prompt();
         io::stdout().flush().ok();
 
-        let Some(input) = read_interactive_message(&rx) else {
-            break;
+        let first = loop {
+            if resize_rx.try_recv().is_ok() {
+                display::on_resize();
+                display::interactive_prompt();
+                io::stdout().flush().ok();
+            }
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(l) => break Some(l),
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break None,
+            }
+        };
+
+        let Some(first_line) = first else { break };
+
+        let input = if first_line.trim_start().starts_with('/') {
+            first_line
+        } else {
+            let mut lines = vec![first_line];
+            while let Ok(l) = rx.recv_timeout(Duration::from_millis(40)) {
+                lines.push(l);
+            }
+            lines.join("\n")
         };
 
         let trimmed = input.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        match parse_interactive_action(trimmed) {
-            InteractiveAction::Exit => {
-                display::goodbye();
-                break;
-            }
-            InteractiveAction::Help => display::interactive_help(),
-            InteractiveAction::DryRunWorkflow { task } => {
-                run_summon_command(&task, false, false, PermissionMode::Interactive);
-            }
-            InteractiveAction::ExecuteWorkflow {
-                task,
-                permission_mode,
-            } => {
-                run_summon_command(&task, true, false, permission_mode);
-            }
-            InteractiveAction::ExecuteSingleAgent {
-                agent,
-                task,
-                permission_mode,
-            } => {
-                run_single_agent_command(&agent, &task, true, false, permission_mode);
-            }
-        }
+        if trimmed.is_empty() { continue; }
+        if !dispatch(trimmed) { break; }
     }
 }
 
 fn read_interactive_message(rx: &std::sync::mpsc::Receiver<String>) -> Option<String> {
     let first = rx.recv().ok()?;
+    if first.trim_start().starts_with('/') {
+        return Some(first);
+    }
     let mut lines = vec![first];
 
     while let Ok(line) = rx.recv_timeout(std::time::Duration::from_millis(40)) {
@@ -182,35 +335,39 @@ fn read_interactive_message(rx: &std::sync::mpsc::Receiver<String>) -> Option<St
 }
 
 pub fn print_intro() {
-    println!("Wisp\n");
-    println!("A local personal coding agent.\n");
-    println!("Usage:");
-    println!("  wisp init");
-    println!("  wisp doctor");
-    println!("  wisp summon \"<task>\"");
-    println!("  wisp ask <agent> \"<task>\" --execute-agents");
+    use crate::display;
+    display::interactive_header();
+    println!("  Usage:");
+    println!("    wisp init");
+    println!("    wisp doctor");
+    println!("    wisp summon \"<task>\"");
+    println!("    wisp ask <agent> \"<task>\" --execute-agents");
+    println!();
 }
 
 pub fn init(force: bool) {
-    let wisp_toml = Path::new("wisp.toml");
+    use crate::display;
 
+    display::init_header();
+
+    let wisp_toml = Path::new("wisp.toml");
     if wisp_toml.exists() && !force {
-        println!("wisp.toml already exists. Use --force to overwrite.");
+        display::init_overwrite_hint();
     } else {
         match fs::write(wisp_toml, config::default_config_toml()) {
-            Ok(_) => println!("Created wisp.toml"),
-            Err(e) => eprintln!("Failed to create wisp.toml: {}", e),
+            Ok(_) => display::init_created("wisp.toml"),
+            Err(e) => display::init_error("wisp.toml", &e),
         }
     }
 
     let sessions_dir = Path::new(".wisp/sessions");
-    if !sessions_dir.exists() {
-        match fs::create_dir_all(sessions_dir) {
-            Ok(_) => println!("Created .wisp/sessions/"),
-            Err(e) => eprintln!("Failed to create .wisp/sessions/: {}", e),
-        }
+    if sessions_dir.exists() {
+        display::init_exists(".wisp/sessions/");
     } else {
-        println!(".wisp/sessions/ already exists.");
+        match fs::create_dir_all(sessions_dir) {
+            Ok(_) => display::init_created(".wisp/sessions/"),
+            Err(e) => display::init_error(".wisp/sessions/", &e),
+        }
     }
 
     let instructions_file = Path::new(".wisp/instructions.md");
@@ -218,77 +375,52 @@ pub fn init(force: bool) {
         let content =
             "# Project Instructions\n\nAdd project-specific instructions for Wisp agents here.\n";
         match fs::write(instructions_file, content) {
-            Ok(_) => println!("Created .wisp/instructions.md"),
-            Err(e) => eprintln!("Failed to create .wisp/instructions.md: {}", e),
+            Ok(_) => display::init_created(".wisp/instructions.md"),
+            Err(e) => display::init_error(".wisp/instructions.md", &e),
         }
+    } else {
+        display::init_exists(".wisp/instructions.md");
     }
 
-    println!("\nWisp initialized. Edit wisp.toml to configure agents and workflow.");
+    display::init_done();
 }
 
 pub fn doctor() {
-    println!("Wisp Doctor\n");
+    use crate::display;
+
+    display::doctor_header();
 
     let git_ok = git::git_available();
-    check("Git installed", git_ok);
-    if !git_ok {
-        println!("    Install: https://git-scm.com/downloads");
-    }
+    display::doctor_check("git installed", git_ok, Some("install: https://git-scm.com/downloads"));
 
     let git_repo = git::is_git_repo();
-    check("Git repository", git_repo);
-    if !git_repo {
-        println!("    Run: git init");
-    }
-
-    let claude_ok = cmd_available("claude", "--version");
-    check(
-        "Claude CLI - direct + workflow      [--execute-agents]",
-        claude_ok,
-    );
-    if !claude_ok {
-        println!("    npm install -g @anthropic-ai/claude-code");
-        println!("    (not needed for dry-run mode)");
-    }
-
-    let codex_ok = cmd_available("codex", "--version");
-    check(
-        "Codex CLI  - direct + workflow      [--execute-agents]",
-        codex_ok,
-    );
-    if !codex_ok {
-        println!("    npm install -g @openai/codex");
-        println!("    (not needed for dry-run mode)");
-    }
+    display::doctor_check("git repository", git_repo, Some("run: git init"));
 
     let config_ok = config::Config::exists();
-    check("wisp.toml exists", config_ok);
-    if !config_ok {
-        println!("    Run: wisp init");
-    }
+    display::doctor_check("wisp.toml exists", config_ok, Some("run: wisp init"));
 
     let sessions_ok = Path::new(".wisp/sessions").exists();
-    check(".wisp/sessions/ exists", sessions_ok);
-    if !sessions_ok {
-        println!("    Run: wisp init");
-    }
+    display::doctor_check(".wisp/sessions/ exists", sessions_ok, Some("run: wisp init"));
 
     println!();
-    if git_ok && git_repo && config_ok && sessions_ok {
-        if claude_ok && codex_ok {
-            println!("All checks passed. Wisp is fully ready.");
-        } else {
-            println!("Wisp is ready (dry-run mode).");
-            println!("Install Claude CLI and Codex CLI to enable --execute-agents.");
-        }
-    } else {
-        println!("Some checks failed. Run `wisp init` and install missing tools.");
-    }
-}
 
-fn check(label: &str, ok: bool) {
-    let status = if ok { "OK  " } else { "FAIL" };
-    println!("  [{}] {}", status, label);
+    let claude_ok = cmd_available("claude", "--version");
+    display::doctor_check(
+        "Claude CLI  [--execute-agents, workflow]",
+        claude_ok,
+        Some("npm install -g @anthropic-ai/claude-code  (optional for dry-run)"),
+    );
+
+    let codex_ok = cmd_available("codex", "--version");
+    display::doctor_check(
+        "Codex CLI   [--execute-agents, workflow]",
+        codex_ok,
+        Some("npm install -g @openai/codex  (optional for dry-run)"),
+    );
+
+    let env_ok = git_ok && git_repo && config_ok && sessions_ok;
+    let agents_ok = claude_ok && codex_ok;
+    display::doctor_summary(env_ok, agents_ok);
 }
 
 fn cmd_available(cmd: &str, arg: &str) -> bool {
@@ -397,6 +529,28 @@ mod tests {
     use crate::agent::PermissionMode;
 
     #[test]
+    fn parses_slash_as_command_preview() {
+        assert_eq!(
+            parse_interactive_action("/"),
+            InteractiveAction::PreviewCommands {
+                query: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_slash_claude_direct_command() {
+        assert_eq!(
+            parse_interactive_action("/claude fix bug"),
+            InteractiveAction::ExecuteSingleAgent {
+                agent: "claude".into(),
+                task: "fix bug".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+    }
+
+    #[test]
     fn parses_claude_direct_command() {
         assert_eq!(
             parse_interactive_action("!claude fix bug"),
@@ -438,5 +592,22 @@ mod tests {
                 task: "review this repo\nfocus on auth\nand tests".into()
             }
         );
+    }
+
+    #[test]
+    fn unknown_slash_command_shows_preview() {
+        assert_eq!(
+            parse_interactive_action("/co"),
+            InteractiveAction::PreviewCommands { query: "co".into() }
+        );
+    }
+
+    #[test]
+    fn slash_commands_are_not_multiline_tasks() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send("/".to_string()).unwrap();
+        tx.send("/exit".to_string()).unwrap();
+
+        assert_eq!(super::read_interactive_message(&rx), Some("/".to_string()));
     }
 }

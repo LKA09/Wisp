@@ -4,6 +4,7 @@ mod config;
 mod display;
 mod error;
 mod git;
+mod input;
 mod instructions;
 mod language;
 mod policy;
