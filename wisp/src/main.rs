@@ -15,7 +15,11 @@ use crate::agent::PermissionMode;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "wisp", version, about = "Local personal coding agent orchestrator")]
+#[command(
+    name = "wisp",
+    version,
+    about = "Local personal coding agent orchestrator"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

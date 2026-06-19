@@ -19,8 +19,8 @@ pub use fallback::RawConsole;
 
 #[cfg(windows)]
 mod windows_impl {
-    use std::ffi::c_void;
     use super::Key;
+    use std::ffi::c_void;
 
     const STD_INPUT_HANDLE: u32 = 0xFFFF_FFF6;
     const KEY_EVENT: u16 = 0x0001;
@@ -89,7 +89,10 @@ mod windows_impl {
                 if SetConsoleMode(h, raw) == 0 {
                     return None;
                 }
-                Some(RawConsole { handle: h, original_mode: mode })
+                Some(RawConsole {
+                    handle: h,
+                    original_mode: mode,
+                })
             }
         }
 
@@ -109,9 +112,7 @@ mod windows_impl {
                         _event: [0u8; 16],
                     };
                     let mut read = 0u32;
-                    if ReadConsoleInputW(self.handle, &mut record, 1, &mut read) == 0
-                        || read == 0
-                    {
+                    if ReadConsoleInputW(self.handle, &mut record, 1, &mut read) == 0 || read == 0 {
                         return None;
                     }
 
