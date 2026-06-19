@@ -1,6 +1,9 @@
 /// Terminal conversation UI for Wisp.
 /// Uses ANSI escape codes — works on Windows Terminal, macOS Terminal, and most Linux terminals.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 const W: usize = 64;
 
 // ANSI codes
@@ -147,6 +150,43 @@ pub fn no_config_hint() {
     println!();
     thick_rule();
     println!();
+}
+
+// ─── Thinking spinner ─────────────────────────────────────────────────────────
+
+pub struct ThinkingSpinner {
+    running: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ThinkingSpinner {
+    pub fn start() -> Self {
+        let running = Arc::new(AtomicBool::new(true));
+        let r = running.clone();
+        let thread = std::thread::spawn(move || {
+            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut i = 0usize;
+            while r.load(Ordering::Relaxed) {
+                use std::io::Write;
+                print!("\r  │  \x1b[90m{} thinking...\x1b[0m", frames[i % frames.len()]);
+                let _ = std::io::stdout().flush();
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                i += 1;
+            }
+        });
+        ThinkingSpinner { running, thread: Some(thread) }
+    }
+
+    pub fn stop(&mut self) {
+        if self.thread.is_none() { return; }
+        self.running.store(false, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        use std::io::Write;
+        print!("\r\x1b[2K");
+        let _ = std::io::stdout().flush();
+    }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

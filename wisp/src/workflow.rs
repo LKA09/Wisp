@@ -115,7 +115,31 @@ pub fn summon(args: SummonArgs) -> Result<()> {
 
         let (ok, output) = if args.execute_agents {
             let runner = SubprocessRunner { config: runner_cfg };
-            match runner.run_streaming(prompt, &cwd, |line| display::agent_line(line)) {
+            let mut spinner = display::ThinkingSpinner::start();
+            let mut at_line_start = true;
+            let mut first_chunk = true;
+            let result = runner.run_streaming(prompt, &cwd, |chunk| {
+                use std::io::Write;
+                if first_chunk {
+                    spinner.stop();
+                    first_chunk = false;
+                }
+                for ch in chunk.chars() {
+                    if at_line_start {
+                        print!("  │  ");
+                        at_line_start = false;
+                    }
+                    match ch {
+                        '\n' => { println!(); at_line_start = true; }
+                        '\r' => {}
+                        c => print!("{}", c),
+                    }
+                }
+                let _ = std::io::stdout().flush();
+            });
+            spinner.stop(); // no-op if already stopped by first chunk
+            if !at_line_start { println!(); } // finish any partial line
+            match result {
                 Ok(out) => {
                     if !out.stderr.is_empty() {
                         display::agent_blank();
