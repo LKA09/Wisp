@@ -10,14 +10,11 @@ mod policy;
 mod session;
 mod workflow;
 
+use crate::agent::PermissionMode;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(
-    name = "wisp",
-    disable_help_flag = true,
-    disable_version_flag = true
-)]
+#[command(name = "wisp", disable_help_flag = true, disable_version_flag = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -43,6 +40,25 @@ enum Commands {
         /// Allow running with uncommitted changes
         #[arg(long)]
         allow_dirty: bool,
+        /// Permission mode for agent CLI execution
+        #[arg(long, value_enum, default_value = "interactive")]
+        permission: PermissionMode,
+    },
+    /// Run a single agent directly
+    Ask {
+        /// The agent name, for example claude or codex
+        agent: String,
+        /// The task description
+        task: String,
+        /// Actually invoke the agent CLI (default: dry-run)
+        #[arg(long)]
+        execute_agents: bool,
+        /// Allow running with uncommitted changes
+        #[arg(long)]
+        allow_dirty: bool,
+        /// Permission mode for agent CLI execution
+        #[arg(long, value_enum, default_value = "interactive")]
+        permission: PermissionMode,
     },
 }
 
@@ -62,8 +78,18 @@ fn main() {
             task,
             execute_agents,
             allow_dirty,
+            permission,
         }) => {
-            cli::summon(&task, execute_agents, allow_dirty);
+            cli::summon(&task, execute_agents, allow_dirty, permission);
+        }
+        Some(Commands::Ask {
+            agent,
+            task,
+            execute_agents,
+            allow_dirty,
+            permission,
+        }) => {
+            cli::ask(&agent, &task, execute_agents, allow_dirty, permission);
         }
     }
 }
@@ -84,7 +110,9 @@ fn enable_ansi_windows() {
 
     unsafe {
         let handle = GetStdHandle(STD_OUTPUT_HANDLE);
-        if handle.is_null() { return; }
+        if handle.is_null() {
+            return;
+        }
         let mut mode: u32 = 0;
         if GetConsoleMode(handle, &mut mode) != 0 {
             SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);

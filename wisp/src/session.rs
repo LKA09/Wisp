@@ -15,12 +15,9 @@ impl Session {
 
         fs::create_dir_all(&dir)
             .with_context(|| format!("Failed to create session directory: {}", dir.display()))?;
-        fs::create_dir_all(dir.join("prompts"))
-            .context("Failed to create prompts directory")?;
-        fs::create_dir_all(dir.join("outputs"))
-            .context("Failed to create outputs directory")?;
-        fs::create_dir_all(dir.join("git"))
-            .context("Failed to create git directory")?;
+        fs::create_dir_all(dir.join("prompts")).context("Failed to create prompts directory")?;
+        fs::create_dir_all(dir.join("outputs")).context("Failed to create outputs directory")?;
+        fs::create_dir_all(dir.join("git")).context("Failed to create git directory")?;
 
         Ok(Session { dir })
     }

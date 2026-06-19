@@ -2,6 +2,13 @@ use crate::config::Config;
 use crate::git::{GitSnapshot, StatusEntry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    Allow,
+    Deny,
+    Ask,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalEvent {
     Push,
     Commit,
@@ -39,20 +46,29 @@ pub fn is_denied_command(command: &str, config: &Config) -> bool {
         .any(|d| cmd_lower.contains(&d.to_lowercase()))
 }
 
-pub fn requires_approval(event: &ApprovalEvent, config: &Config) -> bool {
-    let needs = |val: &str| val == "always" || val == "ask";
+pub fn approval_decision(event: &ApprovalEvent, config: &Config) -> ApprovalDecision {
+    let parse = |value: &str| match value {
+        "allow" => ApprovalDecision::Allow,
+        "deny" => ApprovalDecision::Deny,
+        "always" | "ask" => ApprovalDecision::Ask,
+        _ => ApprovalDecision::Ask,
+    };
+
     match event {
-        ApprovalEvent::Push => needs(&config.approval.push),
-        ApprovalEvent::Commit => needs(&config.approval.commit),
-        ApprovalEvent::AddDependency => needs(&config.approval.add_dependency),
-        ApprovalEvent::DeleteFile => needs(&config.approval.delete_file),
-        ApprovalEvent::ModifyProtectedFile => true,
+        ApprovalEvent::Push => parse(&config.approval.push),
+        ApprovalEvent::Commit => parse(&config.approval.commit),
+        ApprovalEvent::AddDependency => parse(&config.approval.add_dependency),
+        ApprovalEvent::DeleteFile => parse(&config.approval.delete_file),
+        ApprovalEvent::ModifyProtectedFile => parse(&config.approval.modify_protected_file),
         ApprovalEvent::ContinueAfterTestFailure => {
-            needs(&config.approval.continue_after_test_failure)
+            parse(&config.approval.continue_after_test_failure)
         }
-        ApprovalEvent::AgentDisagreement => true,
-        ApprovalEvent::RiskyCommand => true,
+        ApprovalEvent::AgentDisagreement | ApprovalEvent::RiskyCommand => ApprovalDecision::Deny,
     }
+}
+
+pub fn requires_approval(event: &ApprovalEvent, config: &Config) -> bool {
+    !matches!(approval_decision(event, config), ApprovalDecision::Allow)
 }
 
 pub fn is_protected_branch(branch: &str, config: &Config) -> bool {
@@ -170,8 +186,8 @@ fn matches_sensitive_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_snapshot_delta, is_dependency_manifest, is_protected_branch, is_protected_path,
-        ApprovalEvent,
+        ApprovalEvent, evaluate_snapshot_delta, is_dependency_manifest, is_protected_branch,
+        is_protected_path,
     };
     use crate::config::{
         AgentConfig, ApprovalConfig, Config, InstructionsConfig, LanguageConfig, PolicyConfig,
@@ -196,7 +212,7 @@ mod tests {
                 max_review_rounds: 2,
             },
             approval: ApprovalConfig {
-                push: "always".into(),
+                push: "deny".into(),
                 commit: "ask".into(),
                 add_dependency: "ask".into(),
                 delete_file: "ask".into(),
@@ -267,14 +283,20 @@ mod tests {
 
         let violations = evaluate_snapshot_delta(&before, &after, &delta, &config);
         assert!(violations.iter().any(|v| v.event == ApprovalEvent::Commit));
-        assert!(violations
-            .iter()
-            .any(|v| v.event == ApprovalEvent::AddDependency));
-        assert!(violations
-            .iter()
-            .any(|v| v.event == ApprovalEvent::DeleteFile));
-        assert!(violations
-            .iter()
-            .any(|v| v.event == ApprovalEvent::ModifyProtectedFile));
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.event == ApprovalEvent::AddDependency)
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.event == ApprovalEvent::DeleteFile)
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.event == ApprovalEvent::ModifyProtectedFile)
+        );
     }
 }

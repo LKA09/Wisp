@@ -1,0 +1,40 @@
+npm 배포 방법
+
+이 저장소에서 npm 배포는 루트가 아니라 `npm/` 디렉터리의 패키지(`@lka09/wisp`)를 배포하는 흐름이다.
+
+1. 사전 확인
+- npm 계정 로그인: `npm login`
+- 배포 권한 확인: `npm whoami`
+- Rust 빌드 가능 상태 확인: `cargo --version`
+
+2. 버전 맞추기
+- 배포 버전은 `npm/package.json`의 `version` 값을 기준으로 한다.
+- `npm/scripts/postinstall.js`는 GitHub Releases에서 `v<version>` 태그의 바이너리를 받으므로, npm 버전과 GitHub 릴리스 버전이 반드시 같아야 한다.
+
+3. 바이너리 준비
+- 플랫폼별 바이너리를 릴리스 자산으로 올려야 한다.
+- 현재 스크립트가 기대하는 파일명:
+  - `wisp-darwin-x86_64`
+  - `wisp-darwin-aarch64`
+  - `wisp-linux-x86_64`
+  - `wisp-linux-aarch64`
+  - `wisp-windows-x86_64.exe`
+  - `wisp-windows-aarch64.exe`
+
+4. 로컬 점검
+- 루트에서 빌드: `npm run build`
+- 필요하면 패키지 내용 확인: `cd npm && npm pack`
+
+5. npm 배포
+- `cd npm`
+- 스코프 패키지이므로 공개 배포 시 보통 아래 명령을 사용한다.
+- `npm publish --access public`
+
+6. 배포 후 확인
+- 설치 테스트: `npm install -g @lka09/wisp`
+- 실행 테스트: `wisp --help`
+
+주의
+- 루트 `package.json`은 `private: true`라서 배포 대상이 아니다.
+- `wisp.toml` 기본 설정에는 `npm publish` 차단 예시가 있으므로, Wisp 내부에서 실행한다면 해당 정책에 막힐 수 있다.
+- GitHub Releases에 같은 버전의 바이너리가 없으면 설치 시 `postinstall` 다운로드가 실패하고, 사용자가 직접 빌드해야 한다.

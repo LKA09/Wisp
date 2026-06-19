@@ -1,39 +1,32 @@
-/// Terminal conversation UI for Wisp.
-/// Uses ANSI escape codes and adapts to the current terminal width.
-
 use std::env;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-const DEFAULT_WIDTH: usize = 64;
+const DEFAULT_WIDTH: usize = 72;
 const MIN_WIDTH: usize = 24;
 const INDENT: &str = "  ";
 
-// ANSI codes
 const RST: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
-const CYAN: &str = "\x1b[96m"; // Claude
-const YLW: &str = "\x1b[93m"; // Codex
-const GRN: &str = "\x1b[92m"; // success
-const RED: &str = "\x1b[91m"; // error
-const MAG: &str = "\x1b[95m"; // Wisp brand
-const GRAY: &str = "\x1b[90m"; // dim chrome
+const CYAN: &str = "\x1b[96m";
+const YLW: &str = "\x1b[93m";
+const GRN: &str = "\x1b[92m";
+const RED: &str = "\x1b[91m";
+const MAG: &str = "\x1b[95m";
+const GRAY: &str = "\x1b[90m";
 
 pub fn header(task: &str, branch: &str, mode: &str, n_instructions: usize) {
     println!();
     thick_rule();
-    println!();
-    println!("{INDENT}{BOLD}{MAG}✦ Wisp{RST}");
+    println!("{INDENT}{BOLD}{MAG}Wisp{RST}");
     print_wrapped(task, BOLD, RST);
-
     let meta = if n_instructions > 0 {
-        format!("{branch}  ·  {mode}  ·  {n_instructions} instruction file(s)")
+        format!("{branch} | {mode} | {n_instructions} instruction file(s)")
     } else {
-        format!("{branch}  ·  {mode}")
+        format!("{branch} | {mode}")
     };
     print_wrapped(&meta, GRAY, RST);
-    println!();
     thick_rule();
     println!();
 }
@@ -42,7 +35,7 @@ pub fn agent_start(agent: &str, role: &str, step: usize, total: usize) {
     let color = agent_color(agent);
     println!();
     println!(
-        "{INDENT}{BOLD}{color}{}{RST}{DIM}{GRAY} → {RST}{DIM}{GRAY}[{step}/{total}]{RST}",
+        "{INDENT}{BOLD}{color}{}{RST} {DIM}{GRAY}[{step}/{total}] {RST}",
         agent_display(agent)
     );
     print_wrapped(&format!("role: {role}"), GRAY, RST);
@@ -50,37 +43,38 @@ pub fn agent_start(agent: &str, role: &str, step: usize, total: usize) {
 }
 
 pub fn agent_line(line: &str) {
-    println!("{INDENT}│  {line}");
+    println!("{INDENT}> {line}");
 }
 
 pub fn agent_blank() {
-    println!("{INDENT}│");
+    println!("{INDENT}");
 }
 
 pub fn agent_end(agent: &str, ok: bool) {
     thin_rule();
     if ok {
-        println!("{INDENT}{GRN}✓{RST}  {} done\n", agent_display(agent));
+        println!("{INDENT}{GRN}OK{RST}  {} done\n", agent_display(agent));
     } else {
-        println!("{INDENT}{RED}✗{RST}  {} error\n", agent_display(agent));
+        println!("{INDENT}{RED}ERR{RST} {} stopped\n", agent_display(agent));
     }
 }
 
 pub fn wisp_note(msg: &str) {
-    print_wrapped(&format!("wisp →  {msg}"), GRAY, RST);
+    print_wrapped(&format!("wisp: {msg}"), GRAY, RST);
 }
 
 pub fn finish(session_path: &str, dry_run: bool) {
     println!();
     thick_rule();
-    println!();
-    println!("{INDENT}{GRN}✓{RST}  Session saved");
-    print_wrapped(&format!("→  {session_path}"), GRAY, RST);
+    println!("{INDENT}{GRN}Saved{RST}");
+    print_wrapped(session_path, GRAY, RST);
     if dry_run {
-        println!();
-        print_wrapped("Pass --execute-agents to invoke real agents.", GRAY, RST);
+        print_wrapped(
+            "Use /run, /exec, or --execute-agents to perform real execution.",
+            GRAY,
+            RST,
+        );
     }
-    println!();
     thick_rule();
     println!();
 }
@@ -88,51 +82,54 @@ pub fn finish(session_path: &str, dry_run: bool) {
 pub fn interactive_header() {
     println!();
     thick_rule();
-    println!();
-
-    if content_width() >= 40 {
-        println!("{INDENT}{BOLD}{MAG}✦ Wisp{RST}  —  local coding agent");
-        print_wrapped(
-            "Claude implements  ·  Codex ships  ·  you stay in control",
-            GRAY,
-            RST,
-        );
-    } else {
-        println!("{INDENT}{BOLD}{MAG}✦ Wisp{RST}");
-        print_wrapped("local coding agent", GRAY, RST);
-        print_wrapped("Claude implements", GRAY, RST);
-        print_wrapped("Codex ships", GRAY, RST);
-        print_wrapped("you stay in control", GRAY, RST);
-    }
-
-    println!();
+    println!("{INDENT}{BOLD}{MAG}Wisp{RST}");
+    print_wrapped(
+        "Default interactive mode is safe dry-run preview.",
+        GRAY,
+        RST,
+    );
+    print_wrapped("Use /run or /exec for workflow execution.", GRAY, RST);
+    print_wrapped(
+        "Use !claude or !codex for direct single-agent ask mode.",
+        GRAY,
+        RST,
+    );
     thick_rule();
     println!();
-    print_wrapped("Type a task and press Enter — default is dry-run preview.", GRAY, RST);
-
-    if content_width() >= 52 {
-        println!(
-            "{INDENT}{GRAY}Default is dry-run. Use {RST}{BOLD}!{RST}{GRAY} to execute.  {RST}{BOLD}exit{RST}{GRAY} to quit.{RST}"
-        );
-    } else {
-        print_wrapped("Default is dry-run preview.", GRAY, RST);
-        print_wrapped("Prefix with ! to execute agents.", GRAY, RST);
-        print_wrapped("Type exit to quit.", GRAY, RST);
-    }
 }
 
 pub fn interactive_prompt() {
-    print!("{INDENT}{MAG}✦{RST} ");
+    print!("{INDENT}{MAG}>{RST} ");
 }
 
 pub fn interactive_help() {
     println!();
-    println!("{INDENT}{BOLD}Commands:{RST}");
-    print_wrapped("<task>      dry-run preview only", GRAY, RST);
-    print_wrapped("!<task>     execute agents for real", GRAY, RST);
-    print_wrapped("~<task>     explicit dry-run preview", GRAY, RST);
-    print_wrapped("exit        quit Wisp", GRAY, RST);
-    print_wrapped("help        show this", GRAY, RST);
+    println!("{INDENT}{BOLD}Interactive Commands{RST}");
+    print_wrapped("task              dry-run workflow preview", GRAY, RST);
+    print_wrapped("!task             dry-run workflow preview", GRAY, RST);
+    print_wrapped("~task             dry-run workflow preview", GRAY, RST);
+    print_wrapped("/run task         execute full workflow", GRAY, RST);
+    print_wrapped("/exec task        execute full workflow", GRAY, RST);
+    print_wrapped("!claude task      ask Claude only", GRAY, RST);
+    print_wrapped("!codex task       ask Codex only", GRAY, RST);
+    print_wrapped("/run claude task  execute Claude only", GRAY, RST);
+    print_wrapped("/run codex task   execute Codex only", GRAY, RST);
+    print_wrapped(
+        "/auto task        execute workflow with auto permission mode",
+        GRAY,
+        RST,
+    );
+    print_wrapped(
+        "/auto claude task execute Claude only with auto permission mode",
+        GRAY,
+        RST,
+    );
+    print_wrapped(
+        "/auto codex task  execute Codex only with auto permission mode",
+        GRAY,
+        RST,
+    );
+    print_wrapped("exit              quit", GRAY, RST);
     println!();
 }
 
@@ -145,13 +142,9 @@ pub fn goodbye() {
 pub fn no_config_hint() {
     println!();
     thick_rule();
-    println!();
-    println!("{INDENT}{BOLD}{MAG}✦ Wisp{RST}");
-    println!();
+    println!("{INDENT}{BOLD}{MAG}Wisp{RST}");
     print_wrapped("No wisp.toml found in this directory.", GRAY, RST);
-    println!();
-    print_wrapped("Run wisp init to set up Wisp here.", BOLD, RST);
-    println!();
+    print_wrapped("Run `wisp init` to set up Wisp here.", BOLD, RST);
     thick_rule();
     println!();
 }
@@ -166,11 +159,14 @@ impl ThinkingSpinner {
         let running = Arc::new(AtomicBool::new(true));
         let r = running.clone();
         let thread = std::thread::spawn(move || {
-            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let frames = ["-", "\\", "|", "/"];
             let mut i = 0usize;
             while r.load(Ordering::Relaxed) {
                 use std::io::Write;
-                print!("\r{INDENT}│  \x1b[90m{} thinking...\x1b[0m", frames[i % frames.len()]);
+                print!(
+                    "\r{INDENT}{GRAY}{} thinking...{RST}",
+                    frames[i % frames.len()]
+                );
                 let _ = std::io::stdout().flush();
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 i += 1;
@@ -213,11 +209,11 @@ fn agent_color(agent: &str) -> &'static str {
 }
 
 fn thick_rule() {
-    println!("{GRAY}{}{RST}", "━".repeat(content_width() + INDENT.len()));
+    println!("{GRAY}{}{RST}", "=".repeat(content_width() + INDENT.len()));
 }
 
 fn thin_rule() {
-    println!("{INDENT}{GRAY}{}{RST}", "─".repeat(content_width()));
+    println!("{INDENT}{GRAY}{}{RST}", "-".repeat(content_width()));
 }
 
 fn print_wrapped(text: &str, prefix: &str, suffix: &str) {
@@ -296,9 +292,7 @@ fn split_long_word(word: &str, width: usize, lines: &mut Vec<String>, current: &
 }
 
 fn content_width() -> usize {
-    terminal_width()
-        .saturating_sub(INDENT.len())
-        .max(MIN_WIDTH)
+    terminal_width().saturating_sub(INDENT.len()).max(MIN_WIDTH)
 }
 
 fn terminal_width() -> usize {

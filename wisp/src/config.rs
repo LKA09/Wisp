@@ -24,6 +24,14 @@ pub struct LanguageConfig {
 pub struct AgentConfig {
     pub cmd: String,
     pub args: Vec<String>,
+    #[serde(default = "default_agent_input")]
+    pub input: String,
+    #[serde(default)]
+    pub permission_interactive_args: Vec<String>,
+    #[serde(default)]
+    pub permission_auto_args: Vec<String>,
+    #[serde(default)]
+    pub permission_skip_args: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -45,6 +53,10 @@ pub struct ApprovalConfig {
     pub continue_after_test_failure: String,
 }
 
+fn default_agent_input() -> String {
+    "arg".to_string()
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct InstructionsConfig {
     pub files: Vec<String>,
@@ -61,10 +73,8 @@ pub struct PolicyConfig {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let content =
-            std::fs::read_to_string("wisp.toml").context("Failed to read wisp.toml")?;
-        let config: Config =
-            toml::from_str(&content).context("Failed to parse wisp.toml")?;
+        let content = std::fs::read_to_string("wisp.toml").context("Failed to read wisp.toml")?;
+        let config: Config = toml::from_str(&content).context("Failed to parse wisp.toml")?;
         Ok(config)
     }
 
@@ -81,11 +91,19 @@ internal = "en"
 
 [agents.claude]
 cmd = "claude"
-args = ["-p"]
+args = ["-p", "{prompt}"]
+input = "arg"
+permission_interactive_args = []
+permission_auto_args = []
+permission_skip_args = []
 
 [agents.codex]
 cmd = "codex"
-args = ["exec", "-s", "workspace-write"]
+args = ["exec", "-s", "workspace-write", "{prompt}"]
+input = "arg"
+permission_interactive_args = []
+permission_auto_args = []
+permission_skip_args = []
 
 [workflow]
 implementer = "claude"
@@ -95,7 +113,7 @@ shipper = "codex"
 max_review_rounds = 2
 
 [approval]
-push = "always"
+push = "deny"
 commit = "ask"
 add_dependency = "ask"
 delete_file = "ask"

@@ -43,7 +43,9 @@ pub fn current_branch() -> Result<Option<String>> {
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()?;
     if output.status.success() {
-        Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
+        Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ))
     } else {
         Ok(None)
     }
@@ -52,7 +54,9 @@ pub fn current_branch() -> Result<Option<String>> {
 pub fn current_head() -> Result<Option<String>> {
     let output = Command::new("git").args(["rev-parse", "HEAD"]).output()?;
     if output.status.success() {
-        Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
+        Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ))
     } else {
         Ok(None)
     }
@@ -98,7 +102,12 @@ pub fn delta_status_entries(before: &GitSnapshot, after: &GitSnapshot) -> Vec<St
     let before_map: BTreeMap<String, (char, char)> = before
         .status_entries
         .iter()
-        .map(|entry| (entry.path.clone(), (entry.index_status, entry.worktree_status)))
+        .map(|entry| {
+            (
+                entry.path.clone(),
+                (entry.index_status, entry.worktree_status),
+            )
+        })
         .collect();
 
     after
@@ -115,10 +124,7 @@ pub fn delta_status_entries(before: &GitSnapshot, after: &GitSnapshot) -> Vec<St
 }
 
 fn parse_status_entries(status_raw: &str) -> Vec<StatusEntry> {
-    status_raw
-        .lines()
-        .filter_map(parse_status_line)
-        .collect()
+    status_raw.lines().filter_map(parse_status_line).collect()
 }
 
 fn parse_status_line(line: &str) -> Option<StatusEntry> {
