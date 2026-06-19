@@ -1,11 +1,11 @@
 # Rust build artifacts
 wisp/target/
 
-# npm binary distribution (compiled locally, not committed)
+# npm binary distribution (compiled locally — not committed, downloaded at postinstall)
 npm/dist/
 
-# Wisp runtime data (user-specific, not committed)
-.wisp/sessions/
+# Wisp runtime data (user-specific, created by `wisp init`)
+**/.wisp/sessions/
 wisp.toml
 
 # OS

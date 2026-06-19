@@ -53,33 +53,37 @@ wisp summon "인증 모듈에 에러 핸들링 추가해줘"
 
 ## 설치
 
-### 요구 사항
+### npm (권장)
 
-| 도구 | 필수 | 비고 |
-|---|---|---|
-| [Rust](https://rustup.rs/) 1.75+ | 필수 | CLI 빌드용 |
-| [Node.js](https://nodejs.org/) 16+ | 선택 | npm 래퍼 사용 시 |
-| [Claude CLI](https://github.com/anthropics/claude-code) | 선택 | `--execute-agents` 사용 시 |
-| [Codex CLI](https://github.com/openai/codex) | 선택 | `--execute-agents` 사용 시 |
+```bash
+npm install -g @lir09/wisp
+```
+
+postinstall 스크립트가 현재 플랫폼에 맞는 바이너리를 GitHub Releases에서 자동으로 다운로드합니다.
+
+> **에이전트 CLI** — Wisp는 드라이런 모드에서 별도 의존성 없이 바로 사용할 수 있습니다. 실제 에이전트를 실행하려면 (`--execute-agents`) 둘 다 설치하세요:
+>
+> ```bash
+> npm install -g @anthropic-ai/claude-code   # Claude — 구현자 + 리뷰어
+> npm install -g @openai/codex               # Codex  — 패처 + 시퍼
+> ```
 
 ### 소스에서 빌드
 
+[Rust](https://rustup.rs/) 1.75+ 와 [Node.js](https://nodejs.org/) 16+ 가 필요합니다.
+
 ```bash
-git clone https://github.com/lir09/wisp
-cd wisp/wisp
-cargo build --release
+git clone https://github.com/LKA09/Wisp
+cd Wisp
+npm run build          # Rust 빌드 + 바이너리를 npm/dist/에 복사
+npm run install:local  # 빌드 + npm link (wisp 명령어 전역 등록)
 ```
 
-바이너리: `wisp/target/release/wisp` (Windows: `wisp.exe`)
-
-### npm 래퍼 설치
+단계별 실행:
 
 ```bash
-# 바이너리를 npm 패키지에 복사
-cp wisp/target/release/wisp npm/dist/        # Linux / macOS
-copy wisp\target\release\wisp.exe npm\dist\  # Windows
-
-# 전역 등록
+cd wisp && cargo build --release
+node npm/scripts/build.js   # npm/dist/에 바이너리 복사
 cd npm && npm link
 ```
 

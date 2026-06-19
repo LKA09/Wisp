@@ -78,15 +78,17 @@ pub fn doctor() {
     }
 
     let claude_ok = cmd_available("claude", "--version");
-    check("Claude CLI (claude)", claude_ok);
+    check("Claude CLI — implementer + reviewer  [--execute-agents]", claude_ok);
     if !claude_ok {
-        println!("    Install: npm install -g @anthropic-ai/claude-code");
+        println!("    npm install -g @anthropic-ai/claude-code");
+        println!("    (not needed for dry-run mode)");
     }
 
     let codex_ok = cmd_available("codex", "--version");
-    check("Codex CLI (codex)", codex_ok);
+    check("Codex CLI  — patcher + shipper       [--execute-agents]", codex_ok);
     if !codex_ok {
-        println!("    Install: npm install -g @openai/codex");
+        println!("    npm install -g @openai/codex");
+        println!("    (not needed for dry-run mode)");
     }
 
     let config_ok = config::Config::exists();
@@ -103,9 +105,11 @@ pub fn doctor() {
 
     println!();
     if git_ok && git_repo && config_ok && sessions_ok {
-        println!("All checks passed. Wisp is ready.");
-        if !claude_ok || !codex_ok {
-            println!("Note: Claude/Codex CLIs are optional for dry-run mode.");
+        if claude_ok && codex_ok {
+            println!("All checks passed. Wisp is fully ready.");
+        } else {
+            println!("Wisp is ready (dry-run mode).");
+            println!("Install Claude CLI and Codex CLI to enable --execute-agents.");
         }
     } else {
         println!("Some checks failed. Run `wisp init` and install missing tools.");

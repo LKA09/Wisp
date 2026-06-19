@@ -53,33 +53,37 @@ wisp summon "add error handling to the auth module"
 
 ## Installation
 
-### Requirements
+### npm (recommended)
 
-| Tool | Required | Notes |
-|---|---|---|
-| [Rust](https://rustup.rs/) 1.75+ | Yes | For building the CLI |
-| [Node.js](https://nodejs.org/) 16+ | Optional | For the npm wrapper |
-| [Claude CLI](https://github.com/anthropics/claude-code) | Optional | Needed for `--execute-agents` |
-| [Codex CLI](https://github.com/openai/codex) | Optional | Needed for `--execute-agents` |
+```bash
+npm install -g @lir09/wisp
+```
+
+The postinstall script automatically downloads the right binary for your platform from GitHub Releases.
+
+> **Agent CLIs** — Wisp works out of the box in dry-run mode. To actually run agents (`--execute-agents`), install both:
+>
+> ```bash
+> npm install -g @anthropic-ai/claude-code   # Claude — implementer + reviewer
+> npm install -g @openai/codex               # Codex  — patcher + shipper
+> ```
 
 ### Build from source
 
+Requires [Rust](https://rustup.rs/) 1.75+ and [Node.js](https://nodejs.org/) 16+.
+
 ```bash
-git clone https://github.com/lir09/wisp
-cd wisp/wisp
-cargo build --release
+git clone https://github.com/LKA09/Wisp
+cd Wisp
+npm run build          # compiles Rust + copies binary to npm/dist/
+npm run install:local  # build + npm link (makes `wisp` available globally)
 ```
 
-Binary: `wisp/target/release/wisp` (Windows: `wisp.exe`)
-
-### npm wrapper
+Or step by step:
 
 ```bash
-# Copy the binary into the npm package
-cp wisp/target/release/wisp npm/dist/        # Linux / macOS
-copy wisp\target\release\wisp.exe npm\dist\  # Windows
-
-# Register globally
+cd wisp && cargo build --release
+node npm/scripts/build.js   # copies binary to npm/dist/
 cd npm && npm link
 ```
 

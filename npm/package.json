@@ -5,9 +5,14 @@
   "bin": {
     "wisp": "./bin/wisp.js"
   },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "build": "node scripts/build.js"
+  },
   "files": [
     "bin",
     "dist",
+    "scripts",
     "README.md"
   ],
   "engines": {
@@ -16,7 +21,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lir09/wisp"
+    "url": "https://github.com/LKA09/Wisp"
   },
   "keywords": [
     "ai",

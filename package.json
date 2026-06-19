@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "node npm/scripts/build.js",
+    "install:local": "node npm/scripts/build.js && cd npm && npm link",
+    "dev": "cargo run --manifest-path wisp/Cargo.toml --"
+  }
+}
