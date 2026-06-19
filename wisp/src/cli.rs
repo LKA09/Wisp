@@ -1,4 +1,4 @@
-use std::fs;
+﻿use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -205,9 +205,6 @@ fn interactive_raw(
     raw: crate::input::RawConsole,
     resize_rx: std::sync::mpsc::Receiver<()>,
 ) {
-    use crate::{display, input};
-    use std::time::Duration;
-
     loop {
         let Some(line) = read_raw_line(&raw, &resize_rx) else {
             break;
@@ -320,30 +317,6 @@ fn interactive_lines(resize_rx: std::sync::mpsc::Receiver<()>) {
     }
 }
 
-fn read_interactive_message(rx: &std::sync::mpsc::Receiver<String>) -> Option<String> {
-    let first = rx.recv().ok()?;
-    if first.trim_start().starts_with('/') {
-        return Some(first);
-    }
-    let mut lines = vec![first];
-
-    while let Ok(line) = rx.recv_timeout(std::time::Duration::from_millis(40)) {
-        lines.push(line);
-    }
-
-    Some(lines.join("\n"))
-}
-
-pub fn print_intro() {
-    use crate::display;
-    display::interactive_header();
-    println!("  Usage:");
-    println!("    wisp init");
-    println!("    wisp doctor");
-    println!("    wisp summon \"<task>\"");
-    println!("    wisp ask <agent> \"<task>\" --execute-agents");
-    println!();
-}
 
 pub fn init(force: bool) {
     use crate::display;
@@ -459,7 +432,7 @@ fn run_summon_command(
             msg(
                 &lang,
                 "Error: wisp.toml not found. Run `wisp init` first.",
-                "?ㅻ쪟: wisp.toml??李얠쓣 ???놁뒿?덈떎. 癒쇱? `wisp init`???ㅽ뻾?섏꽭??"
+                "오류: wisp.toml을 찾을 수 없습니다. 먼저 `wisp init`을 실행하세요."
             )
         );
         std::process::exit(1);
@@ -477,7 +450,7 @@ fn run_summon_command(
         let lang2 = detect(task);
         eprintln!(
             "{}",
-            msg(&lang2, &format!("Error: {}", e), &format!("?ㅻ쪟: {}", e))
+            msg(&lang2, &format!("Error: {}", e), &format!("오류: {}", e))
         );
         std::process::exit(1);
     }
@@ -498,7 +471,7 @@ fn run_single_agent_command(
             msg(
                 &lang,
                 "Error: wisp.toml not found. Run `wisp init` first.",
-                "?ㅻ쪟: wisp.toml??李얠쓣 ???놁뒿?덈떎. 癒쇱? `wisp init`???ㅽ뻾?섏꽭??"
+                "오류: wisp.toml을 찾을 수 없습니다. 먼저 `wisp init`을 실행하세요."
             )
         );
         std::process::exit(1);
@@ -517,7 +490,7 @@ fn run_single_agent_command(
         let lang2 = detect(task);
         eprintln!(
             "{}",
-            msg(&lang2, &format!("Error: {}", e), &format!("?ㅻ쪟: {}", e))
+            msg(&lang2, &format!("Error: {}", e), &format!("오류: {}", e))
         );
         std::process::exit(1);
     }
@@ -602,12 +575,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn slash_commands_are_not_multiline_tasks() {
-        let (tx, rx) = std::sync::mpsc::channel();
-        tx.send("/".to_string()).unwrap();
-        tx.send("/exit".to_string()).unwrap();
-
-        assert_eq!(super::read_interactive_message(&rx), Some("/".to_string()));
-    }
 }

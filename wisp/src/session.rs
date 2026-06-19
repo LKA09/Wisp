@@ -10,7 +10,14 @@ pub struct Session {
 impl Session {
     /// Create a new timestamped session directory under .wisp/sessions/.
     pub fn create() -> Result<Self> {
-        let timestamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
+        let now = Local::now();
+        let pid = std::process::id();
+        let timestamp = format!(
+            "{}-{:03}-p{}",
+            now.format("%Y%m%d-%H%M%S"),
+            now.timestamp_subsec_millis(),
+            pid
+        );
         let dir = PathBuf::from(".wisp/sessions").join(&timestamp);
 
         fs::create_dir_all(&dir)

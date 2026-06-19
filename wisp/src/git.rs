@@ -16,6 +16,8 @@ pub struct GitSnapshot {
     pub status_raw: String,
     pub status_entries: Vec<StatusEntry>,
     pub diff_name_status: String,
+    pub diff_full: String,
+    pub diff_cached: String,
 }
 
 pub fn git_available() -> bool {
@@ -86,6 +88,11 @@ pub fn diff_name_status() -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+pub fn diff_cached() -> Result<String> {
+    let output = Command::new("git").args(["diff", "--cached"]).output()?;
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 pub fn snapshot() -> Result<GitSnapshot> {
     let status_raw = status_porcelain()?;
     let status_entries = parse_status_entries(&status_raw);
@@ -95,6 +102,8 @@ pub fn snapshot() -> Result<GitSnapshot> {
         status_raw,
         status_entries,
         diff_name_status: diff_name_status()?,
+        diff_full: diff()?,
+        diff_cached: diff_cached()?,
     })
 }
 

@@ -30,13 +30,25 @@ pub struct SingleAgentArgs {
     pub lang: Language,
 }
 
-struct WorkflowStep {
-    agent: String,
-    role: &'static str,
-    prompt: String,
-    prompt_file: String,
-    out_file: &'static str,
-    meta_file: &'static str,
+#[derive(Debug, PartialEq, Eq)]
+enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    NeedsUserDecision,
+}
+
+fn parse_review_decision(output: &str) -> ReviewDecision {
+    let upper = output.to_uppercase();
+    if upper.contains("APPROVED") && !upper.contains("CHANGES_REQUESTED") {
+        ReviewDecision::Approved
+    } else if upper.contains("NEEDS_USER_DECISION") {
+        ReviewDecision::NeedsUserDecision
+    } else if upper.contains("CHANGES_REQUESTED") {
+        ReviewDecision::ChangesRequested
+    } else {
+        // No recognized decision — treat as needing another round.
+        ReviewDecision::ChangesRequested
+    }
 }
 
 pub fn summon(args: SummonArgs) -> Result<()> {
@@ -55,7 +67,6 @@ pub fn summon(args: SummonArgs) -> Result<()> {
 
     let normalized_task_en = normalize_task_en(&args.task, &args.lang);
     let instructions_text = instructions.combined();
-    let steps = build_workflow_steps(&config, &normalized_task_en, &args.task, &instructions_text);
 
     session.write("task.original.txt", &args.task)?;
     session.write(
@@ -68,113 +79,176 @@ pub fn summon(args: SummonArgs) -> Result<()> {
     )?;
 
     let cwd = std::env::current_dir()?;
-    let total = steps.len();
+    let max_rounds = (config.workflow.max_review_rounds as usize).max(1);
+    // Total display steps: implement + max_rounds*(patch+review) + ship
+    let total_steps = 2 + max_rounds * 2;
+    let mut step = 0usize;
 
-    for (i, step) in steps.iter().enumerate() {
-        session.write(&step.prompt_file, &step.prompt)?;
+    // ── Step 1: implement (always once) ───────────────────────────────────────
+    step += 1;
+    let impl_prompt =
+        build_implement_prompt(&normalized_task_en, &args.task, &instructions_text);
+    run_workflow_step(
+        &config,
+        &session,
+        &args,
+        &cwd,
+        config.workflow.implementer.as_str(),
+        "implement",
+        step,
+        total_steps,
+        "prompts/implementer.en.md",
+        "outputs/implement.out.md",
+        "outputs/implement.meta.txt",
+        &impl_prompt,
+    )?;
 
-        if i > 0 {
-            let prev_agent = steps[i - 1].agent.as_str();
-            display::wisp_note(&handoff_note(
-                prev_agent,
-                step.agent.as_str(),
-                step.role,
-                &args.lang,
-            ));
-        }
-
-        display::agent_start(step.agent.as_str(), step.role, i + 1, total);
-        let cfg = config
-            .agents
-            .get(step.agent.as_str())
-            .with_context(|| format!("Agent `{}` is not configured.", step.agent))?;
-
-        let prompt_path = session.path().join(&step.prompt_file);
-        let prepared = prepare_command(
-            cfg,
-            step.agent.as_str(),
-            &args.task,
-            session.path(),
-            &step.prompt,
-            &prompt_path,
-            args.permission_mode,
-        );
-        let command_preview = format!("{} {}", prepared.cmd, prepared.args.join(" "));
-        if policy::is_denied_command(&command_preview, &config) {
-            bail!(format!(
-                "Configured agent command is denied by policy: {command_preview}"
-            ));
-        }
-
-        let before_step = git::snapshot().context("Failed to capture pre-step git snapshot")?;
-        let started = Instant::now();
-        let output = if args.execute_agents {
-            run_agent_with_streaming(
-                &prepared,
-                resolve_input_mode(&cfg.input),
-                args.permission_mode,
-                &cwd,
-            )
+    // ── Steps 2+: patch → review loop ─────────────────────────────────────────
+    let mut approved = false;
+    for round in 0..max_rounds {
+        let suffix = if max_rounds > 1 {
+            format!("-r{}", round + 1)
         } else {
-            DryRunRunner {
-                options: AgentRunOptions {
-                    permission_mode: args.permission_mode,
-                    input_mode: resolve_input_mode(&cfg.input),
-                    capture_output: true,
-                    stream_output: true,
-                },
-            }
-            .display_and_capture(&prepared, &step.prompt)
+            String::new()
         };
 
-        let duration_ms = started.elapsed().as_millis();
-        let after_step = git::snapshot().context("Failed to capture post-step git snapshot")?;
-        let delta_entries = git::delta_status_entries(&before_step, &after_step);
-        let violations = if args.execute_agents {
-            policy::evaluate_snapshot_delta(&before_step, &after_step, &delta_entries, &config)
+        // Handoff note before patch
+        let handoff_from = if round == 0 {
+            config.workflow.implementer.as_str()
         } else {
-            Vec::new()
+            config.workflow.reviewer.as_str()
         };
-
-        session.write(
-            step.out_file,
-            &format_agent_output(step.agent.as_str(), step.role, &output),
-        )?;
-        session.write(
-            step.meta_file,
-            &format_step_meta(
-                step.role,
-                step.agent.as_str(),
-                &command_preview,
-                &prompt_path.display().to_string(),
-                &output,
-                duration_ms,
-                &before_step,
-                &after_step,
-                &delta_entries,
-                &violations,
-            ),
-        )?;
-
-        match handle_policy_violations(
-            &violations,
-            &config,
+        display::wisp_note(&handoff_note(
+            handoff_from,
+            config.workflow.patcher.as_str(),
+            "patch",
             &args.lang,
-            step.agent.as_str(),
-            step.role,
-        )? {
-            true => display::agent_end(step.agent.as_str(), output.status == 0),
-            false => {
-                display::agent_end(step.agent.as_str(), false);
-                bail!(format_policy_violation_error(
-                    step.agent.as_str(),
-                    step.role,
-                    &violations,
-                    &args.lang
+        ));
+
+        // patch
+        step += 1;
+        let patch_role = if max_rounds > 1 {
+            format!("patch [r{}]", round + 1)
+        } else {
+            "patch".to_string()
+        };
+        let patch_prompt =
+            build_patch_prompt(&normalized_task_en, &args.task, &instructions_text);
+        run_workflow_step(
+            &config,
+            &session,
+            &args,
+            &cwd,
+            config.workflow.patcher.as_str(),
+            &patch_role,
+            step,
+            total_steps,
+            &format!("prompts/patcher{suffix}.en.md"),
+            &format!("outputs/patch{suffix}.out.md"),
+            &format!("outputs/patch{suffix}.meta.txt"),
+            &patch_prompt,
+        )?;
+
+        // Handoff patch → review
+        display::wisp_note(&handoff_note(
+            config.workflow.patcher.as_str(),
+            config.workflow.reviewer.as_str(),
+            "review",
+            &args.lang,
+        ));
+
+        // review
+        step += 1;
+        let review_role = if max_rounds > 1 {
+            format!("review [r{}]", round + 1)
+        } else {
+            "review".to_string()
+        };
+        let review_prompt = build_review_prompt(&normalized_task_en, &args.task);
+        let review_output = run_workflow_step(
+            &config,
+            &session,
+            &args,
+            &cwd,
+            config.workflow.reviewer.as_str(),
+            &review_role,
+            step,
+            total_steps,
+            &format!("prompts/reviewer{suffix}.en.md"),
+            &format!("outputs/review{suffix}.out.md"),
+            &format!("outputs/review{suffix}.meta.txt"),
+            &review_prompt,
+        )?;
+
+        let decision = parse_review_decision(&review_output.stdout);
+        match decision {
+            ReviewDecision::Approved => {
+                approved = true;
+                break;
+            }
+            ReviewDecision::NeedsUserDecision => {
+                bail!(msg(
+                    &args.lang,
+                    "Review requires user decision (NEEDS_USER_DECISION). Check the session logs and resolve manually.",
+                    "리뷰가 사용자 결정을 요구합니다 (NEEDS_USER_DECISION). 세션 로그를 확인하고 직접 해결하세요.",
                 ));
+            }
+            ReviewDecision::ChangesRequested => {
+                if round + 1 < max_rounds {
+                    display::wisp_note(&match &args.lang {
+                        Language::Korean => format!(
+                            "리뷰 결과: CHANGES_REQUESTED — 재시도 중 (라운드 {}/{}).",
+                            round + 1,
+                            max_rounds
+                        ),
+                        Language::English => format!(
+                            "Review: CHANGES_REQUESTED — retrying patch/review (round {}/{}).",
+                            round + 1,
+                            max_rounds
+                        ),
+                    });
+                }
+                // continue to next round
             }
         }
     }
+
+    if !approved {
+        bail!(msg(
+            &args.lang,
+            &format!(
+                "Max review rounds ({max_rounds}) exhausted without APPROVED. Check session logs for details."
+            ),
+            &format!(
+                "최대 리뷰 횟수({max_rounds}번)를 모두 소진했습니다. 세션 로그에서 세부 내용을 확인하세요."
+            ),
+        ));
+    }
+
+    // ── Step 4: ship (only after APPROVED) ────────────────────────────────────
+    display::wisp_note(&handoff_note(
+        config.workflow.reviewer.as_str(),
+        config.workflow.shipper.as_str(),
+        "ship",
+        &args.lang,
+    ));
+
+    step += 1;
+    let ship_prompt = build_ship_prompt(&normalized_task_en, &args.task);
+    run_workflow_step(
+        &config,
+        &session,
+        &args,
+        &cwd,
+        config.workflow.shipper.as_str(),
+        "ship",
+        step,
+        total_steps,
+        "prompts/shipper.en.md",
+        "outputs/ship.out.md",
+        "outputs/ship.meta.txt",
+        &ship_prompt,
+    )?;
 
     finalize_workflow_summary(
         &session,
@@ -325,6 +399,105 @@ pub fn run_single_agent(args: SingleAgentArgs) -> Result<()> {
     Ok(())
 }
 
+// ── Step runner helper ─────────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn run_workflow_step(
+    config: &Config,
+    session: &Session,
+    args: &SummonArgs,
+    cwd: &std::path::Path,
+    agent: &str,
+    role: &str,
+    step_num: usize,
+    total_steps: usize,
+    prompt_file: &str,
+    out_file: &str,
+    meta_file: &str,
+    prompt: &str,
+) -> Result<AgentOutput> {
+    session.write(prompt_file, prompt)?;
+
+    display::agent_start(agent, role, step_num, total_steps);
+    let cfg = config
+        .agents
+        .get(agent)
+        .with_context(|| format!("Agent `{}` is not configured.", agent))?;
+
+    let prompt_path = session.path().join(prompt_file);
+    let prepared = prepare_command(
+        cfg,
+        agent,
+        &args.task,
+        session.path(),
+        prompt,
+        &prompt_path,
+        args.permission_mode,
+    );
+    let command_preview = format!("{} {}", prepared.cmd, prepared.args.join(" "));
+    if policy::is_denied_command(&command_preview, config) {
+        bail!("Configured agent command is denied by policy: {command_preview}");
+    }
+
+    let before_step = git::snapshot().context("Failed to capture pre-step git snapshot")?;
+    let started = Instant::now();
+    let output = if args.execute_agents {
+        run_agent_with_streaming(
+            &prepared,
+            resolve_input_mode(&cfg.input),
+            args.permission_mode,
+            cwd,
+        )
+    } else {
+        DryRunRunner {
+            options: AgentRunOptions {
+                permission_mode: args.permission_mode,
+                input_mode: resolve_input_mode(&cfg.input),
+                capture_output: true,
+                stream_output: true,
+            },
+        }
+        .display_and_capture(&prepared, prompt)
+    };
+    let duration_ms = started.elapsed().as_millis();
+    let after_step = git::snapshot().context("Failed to capture post-step git snapshot")?;
+    let delta_entries = git::delta_status_entries(&before_step, &after_step);
+    let violations = if args.execute_agents {
+        policy::evaluate_snapshot_delta(&before_step, &after_step, &delta_entries, config)
+    } else {
+        Vec::new()
+    };
+
+    session.write(out_file, &format_agent_output(agent, role, &output))?;
+    session.write(
+        meta_file,
+        &format_step_meta(
+            role,
+            agent,
+            &command_preview,
+            &prompt_path.display().to_string(),
+            &output,
+            duration_ms,
+            &before_step,
+            &after_step,
+            &delta_entries,
+            &violations,
+        ),
+    )?;
+
+    match handle_policy_violations(&violations, config, &args.lang, agent, role)? {
+        true => display::agent_end(agent, output.status == 0),
+        false => {
+            display::agent_end(agent, false);
+            bail!(format_policy_violation_error(agent, role, &violations, &args.lang));
+        }
+    }
+
+    Ok(output)
+}
+
+// ── Validation ─────────────────────────────────────────────────────────────────
+
 fn validate_workflow_agents(config: &Config) -> Result<()> {
     let roles = [
         ("implementer", config.workflow.implementer.as_str()),
@@ -352,7 +525,7 @@ fn validate_execute_preconditions(
         bail!(msg(
             lang,
             "Working tree has uncommitted changes. Re-run with --allow-dirty to proceed.",
-            "?묒뾽 ?몃━??而ㅻ컠?섏? ?딆? 蹂寃쎌씠 ?덉뒿?덈떎. 怨꾩냽?섎젮硫?--allow-dirty瑜?紐낆떆?섏꽭??"
+            "워킹 트리에 커밋되지 않은 변경사항이 있습니다. 계속하려면 --allow-dirty를 지정하세요."
         ));
     }
 
@@ -364,7 +537,7 @@ fn validate_execute_preconditions(
                 "Refusing to execute agents on protected branch `{branch}`. Create a work branch first."
             ),
             &format!(
-                "蹂댄샇 釉뚮옖移?`{branch}`?먯꽌???ㅼ젣 agent ?ㅽ뻾??留됱뒿?덈떎. ?묒뾽 釉뚮옖移섎? 留뚮뱺 ???ㅼ떆 ?ㅽ뻾?섏꽭??"
+                "보호된 브랜치 `{branch}`에서 에이전트 실행이 차단됩니다. 작업 브랜치를 먼저 만드세요."
             )
         ));
     }
@@ -372,47 +545,7 @@ fn validate_execute_preconditions(
     Ok(branch)
 }
 
-fn build_workflow_steps(
-    config: &Config,
-    normalized_task_en: &str,
-    original_task: &str,
-    instructions: &str,
-) -> Vec<WorkflowStep> {
-    vec![
-        WorkflowStep {
-            agent: config.workflow.implementer.clone(),
-            role: "implement",
-            prompt: build_implement_prompt(normalized_task_en, original_task, instructions),
-            prompt_file: "prompts/implementer.en.md".into(),
-            out_file: "outputs/implement.out.md",
-            meta_file: "outputs/implement.meta.txt",
-        },
-        WorkflowStep {
-            agent: config.workflow.patcher.clone(),
-            role: "patch",
-            prompt: build_patch_prompt(normalized_task_en, original_task, instructions),
-            prompt_file: "prompts/patcher.en.md".into(),
-            out_file: "outputs/patch.out.md",
-            meta_file: "outputs/patch.meta.txt",
-        },
-        WorkflowStep {
-            agent: config.workflow.reviewer.clone(),
-            role: "review",
-            prompt: build_review_prompt(normalized_task_en, original_task),
-            prompt_file: "prompts/reviewer.en.md".into(),
-            out_file: "outputs/review.out.md",
-            meta_file: "outputs/review.meta.txt",
-        },
-        WorkflowStep {
-            agent: config.workflow.shipper.clone(),
-            role: "ship",
-            prompt: build_ship_prompt(normalized_task_en, original_task),
-            prompt_file: "prompts/shipper.en.md".into(),
-            out_file: "outputs/ship.out.md",
-            meta_file: "outputs/ship.meta.txt",
-        },
-    ]
-}
+// ── Agent execution ────────────────────────────────────────────────────────────
 
 fn run_agent_with_streaming(
     prepared: &crate::agent::PreparedAgentCommand,
@@ -482,6 +615,8 @@ fn run_agent_with_streaming(
     }
 }
 
+// ── Session logging ────────────────────────────────────────────────────────────
+
 fn write_snapshot(session: &Session, prefix: &str, snapshot: &GitSnapshot) -> Result<()> {
     session.write(
         &format!("{prefix}/head.txt"),
@@ -505,6 +640,8 @@ fn write_snapshot(session: &Session, prefix: &str, snapshot: &GitSnapshot) -> Re
         &format!("{prefix}/diff.name-status.txt"),
         &snapshot.diff_name_status,
     )?;
+    session.write(&format!("{prefix}/diff.txt"), &snapshot.diff_full)?;
+    session.write(&format!("{prefix}/diff.cached.txt"), &snapshot.diff_cached)?;
     Ok(())
 }
 
@@ -588,7 +725,7 @@ fn format_step_meta(
             .join("\n")
     };
 
-    let violations = if violations.is_empty() {
+    let violations_text = if violations.is_empty() {
         "(none)".to_string()
     } else {
         violations
@@ -606,7 +743,7 @@ fn format_step_meta(
         before.head.as_deref().unwrap_or("unknown"),
         after.head.as_deref().unwrap_or("unknown"),
         changed_files,
-        violations
+        violations_text
     )
 }
 
@@ -631,7 +768,7 @@ fn format_policy_violation_error(
             details
         ),
         &format!(
-            "?뺤콉 ?꾨컲?쇰줈 {} ({}) ?④퀎 ?ㅽ뻾 ??以묐떒?덉뒿?덈떎: {}",
+            "정책 위반으로 {} ({}) 실행 후 차단됩니다: {}",
             display::agent_display(agent),
             role,
             details
@@ -648,6 +785,8 @@ fn handoff_note(from: &str, to: &str, role: &str, lang: &Language) -> String {
     }
 }
 
+// ── Task normalization ─────────────────────────────────────────────────────────
+
 fn normalize_task_en(task: &str, lang: &Language) -> String {
     match lang {
         Language::English => task.to_string(),
@@ -657,6 +796,8 @@ fn normalize_task_en(task: &str, lang: &Language) -> String {
         ),
     }
 }
+
+// ── Prompt builders ────────────────────────────────────────────────────────────
 
 fn build_direct_agent_prompt(
     agent: &str,
@@ -794,6 +935,8 @@ Rules:
     )
 }
 
+// ── Session finalization ───────────────────────────────────────────────────────
+
 fn finalize_workflow_summary(
     session: &Session,
     task: &str,
@@ -808,7 +951,24 @@ fn finalize_workflow_summary(
     session.write(
         "summary.md",
         &format!(
-            "# Wisp Session Summary\n\n## Task\n\nOriginal: {}\n\nNormalized: {}\n\n## Context\n\n- Branch: {}\n- Mode: {}\n- Session: {}\n- Instructions loaded: {} ({} bytes{})\n\n## Workflow\n\n1. {} implement\n2. {} patch\n3. {} review\n4. {} ship\n\n## Runtime Safety\n\n- Default interactive behavior is dry-run.\n- Protected branches block execution.\n- Dirty working tree blocks execution unless --allow-dirty is set.\n- Policy checks record changed files, HEAD movement, deletions, dependency changes, and protected path changes.\n",
+            "# Wisp Session Summary\n\n\
+            ## Task\n\n\
+            Original: {}\n\n\
+            Normalized: {}\n\n\
+            ## Context\n\n\
+            - Branch: {}\n\
+            - Mode: {}\n\
+            - Session: {}\n\
+            - Instructions loaded: {} ({} bytes{})\n\n\
+            ## Workflow\n\n\
+            1. {} implement\n\
+            2. {} patch\n\
+            3. {} review\n\
+            4. {} ship\n\n\
+            ## Security Note\n\n\
+            Wisp is not a security sandbox. Agents run with your full user permissions. \
+            The policy layer blocks specific commands and paths configured in wisp.toml, \
+            but cannot prevent all unsafe actions. Review agent output before approving commits.\n",
             task,
             normalized_task_en,
             branch,
@@ -839,7 +999,18 @@ fn finalize_single_agent_summary(
     session.write(
         "summary.md",
         &format!(
-            "# Wisp Single Agent Summary\n\n## Task\n\nOriginal: {}\n\nNormalized: {}\n\n## Context\n\n- Agent: {}\n- Branch: {}\n- Mode: {}\n- Session: {}\n- Instructions loaded: {} ({} bytes{})\n",
+            "# Wisp Single Agent Summary\n\n\
+            ## Task\n\n\
+            Original: {}\n\n\
+            Normalized: {}\n\n\
+            ## Context\n\n\
+            - Agent: {}\n\
+            - Branch: {}\n\
+            - Mode: {}\n\
+            - Session: {}\n\
+            - Instructions loaded: {} ({} bytes{})\n\n\
+            ## Security Note\n\n\
+            Wisp is not a security sandbox. Agents run with your full user permissions.\n",
             task,
             normalized_task_en,
             agent,
@@ -862,5 +1033,52 @@ fn mode_label(execute_agents: bool, permission_mode: PermissionMode) -> String {
         PermissionMode::Interactive => "execute-interactive".to_string(),
         PermissionMode::Auto => "execute-auto".to_string(),
         PermissionMode::Skip => "execute-skip".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ReviewDecision, parse_review_decision};
+
+    #[test]
+    fn parses_approved() {
+        assert_eq!(parse_review_decision("APPROVED"), ReviewDecision::Approved);
+        assert_eq!(
+            parse_review_decision("The code looks good. APPROVED"),
+            ReviewDecision::Approved
+        );
+    }
+
+    #[test]
+    fn parses_changes_requested() {
+        assert_eq!(
+            parse_review_decision("CHANGES_REQUESTED: missing tests"),
+            ReviewDecision::ChangesRequested
+        );
+    }
+
+    #[test]
+    fn parses_needs_user_decision() {
+        assert_eq!(
+            parse_review_decision("NEEDS_USER_DECISION"),
+            ReviewDecision::NeedsUserDecision
+        );
+    }
+
+    #[test]
+    fn changes_requested_takes_priority_over_approved() {
+        // If both somehow appear, CHANGES_REQUESTED wins
+        assert_eq!(
+            parse_review_decision("APPROVED but also CHANGES_REQUESTED"),
+            ReviewDecision::ChangesRequested
+        );
+    }
+
+    #[test]
+    fn unknown_output_defaults_to_changes_requested() {
+        assert_eq!(
+            parse_review_decision("I looked at the code and it seems fine."),
+            ReviewDecision::ChangesRequested
+        );
     }
 }
