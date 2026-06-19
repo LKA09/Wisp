@@ -1,10 +1,9 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
 
-/// Spawn an agent subprocess with the prompt fed via stdin.
-/// Stdin avoids Windows quoting issues with long, multi-line prompts.
-/// On Windows, npm CLIs are .cmd files and must run through `cmd /c`.
 fn spawn_cmd(cmd: &str, args: &[String], prompt: &str, cwd: &Path) -> Result<Child> {
     use std::io::Write;
 
@@ -13,7 +12,7 @@ fn spawn_cmd(cmd: &str, args: &[String], prompt: &str, cwd: &Path) -> Result<Chi
         .arg("/c")
         .arg(cmd)
         .args(args)
-        .arg("-")          // tell the CLI to read prompt from stdin
+        .arg("-")
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -30,7 +29,6 @@ fn spawn_cmd(cmd: &str, args: &[String], prompt: &str, cwd: &Path) -> Result<Chi
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Write prompt to stdin and close it so the CLI knows input is done.
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(prompt.as_bytes())?;
     }
@@ -56,9 +54,13 @@ pub trait AgentRunner {
     fn run(&self, prompt: &str, cwd: &Path) -> Result<AgentOutput>;
 }
 
-/// Runs the agent as a subprocess, streaming each output line via a callback.
 pub struct SubprocessRunner {
     pub config: AgentConfig,
+}
+
+enum StreamEvent {
+    Stdout(String),
+    Stderr(String),
 }
 
 impl SubprocessRunner {
@@ -66,28 +68,58 @@ impl SubprocessRunner {
         &self,
         prompt: &str,
         cwd: &Path,
-        mut on_line: F,
+        mut on_chunk: F,
     ) -> Result<AgentOutput> {
         use std::io::{BufRead, BufReader, Read};
 
         let mut child = spawn_cmd(&self.config.cmd, &self.config.args, prompt, cwd)?;
+        let stdout = child.stdout.take().context("stdout pipe missing")?;
+        let stderr = child.stderr.take().context("stderr pipe missing")?;
 
-        let stdout = child.stdout.take().expect("stdout piped");
-        let stderr = child.stderr.take().expect("stderr piped");
+        let (tx, rx) = mpsc::channel::<StreamEvent>();
+
+        let stdout_tx = tx.clone();
+        let stdout_thread = thread::spawn(move || -> Result<()> {
+            for line in BufReader::new(stdout).lines() {
+                let line = line?;
+                let mut chunk = line;
+                chunk.push('\n');
+                if stdout_tx.send(StreamEvent::Stdout(chunk)).is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        });
+
+        let stderr_thread = thread::spawn(move || -> Result<()> {
+            let mut collected = String::new();
+            BufReader::new(stderr).read_to_string(&mut collected)?;
+            let _ = tx.send(StreamEvent::Stderr(collected));
+            Ok(())
+        });
 
         let mut all_stdout = String::new();
-        for line in BufReader::new(stdout).lines() {
-            let line = line?;
-            on_line(&line);
-            all_stdout.push_str(&line);
-            all_stdout.push('\n');
+        let mut all_stderr = String::new();
+        for event in rx {
+            match event {
+                StreamEvent::Stdout(chunk) => {
+                    on_chunk(&chunk);
+                    all_stdout.push_str(&chunk);
+                }
+                StreamEvent::Stderr(chunk) => {
+                    all_stderr.push_str(&chunk);
+                }
+            }
         }
 
-        let mut all_stderr = String::new();
-        BufReader::new(stderr).read_to_string(&mut all_stderr)?;
+        stdout_thread
+            .join()
+            .map_err(|_| anyhow::anyhow!("stdout reader thread panicked"))??;
+        stderr_thread
+            .join()
+            .map_err(|_| anyhow::anyhow!("stderr reader thread panicked"))??;
 
         let status = child.wait()?;
-
         Ok(AgentOutput {
             status: status.code().unwrap_or(-1),
             stdout: all_stdout,
@@ -102,14 +134,11 @@ impl AgentRunner for SubprocessRunner {
     }
 }
 
-
-/// Dry-run: shows prompt preview in the conversation UI instead of invoking the agent.
 pub struct DryRunRunner {
     pub config: AgentConfig,
 }
 
 impl DryRunRunner {
-    /// Print prompt preview to the conversation UI, return the content for session log.
     pub fn display_and_capture(&self, prompt: &str) -> AgentOutput {
         use crate::display;
 
@@ -120,7 +149,6 @@ impl DryRunRunner {
         ));
         display::agent_blank();
 
-        // Show first 12 lines of the prompt
         let lines: Vec<&str> = prompt.lines().collect();
         let preview_count = lines.len().min(12);
         for line in &lines[..preview_count] {

@@ -7,16 +7,10 @@ use crate::git;
 use crate::language::{detect, msg};
 use crate::workflow::{summon as run_summon, SummonArgs};
 
-// ---------------------------------------------------------------------------
-// wisp (no args) — interactive session
-// ---------------------------------------------------------------------------
-
 pub fn interactive() {
     use crate::display;
-    use crate::language::Language;
     use std::io::{self, Write};
 
-    // If wisp.toml doesn't exist, guide the user first.
     if !config::Config::exists() {
         display::no_config_hint();
         return;
@@ -30,13 +24,12 @@ pub fn interactive() {
 
         let mut input = String::new();
         match io::stdin().read_line(&mut input) {
-            Ok(0) => break, // EOF (Ctrl+D)
+            Ok(0) => break,
             Err(_) => break,
             Ok(_) => {}
         }
 
         let task = input.trim();
-
         if task.is_empty() {
             continue;
         }
@@ -53,12 +46,12 @@ pub fn interactive() {
             _ => {}
         }
 
-        // Default: actually run agents.
-        // Prefix `~` → dry-run preview only.
-        let (task_str, execute) = if let Some(t) = task.strip_prefix('~') {
+        let (task_str, execute) = if let Some(t) = task.strip_prefix('!') {
+            (t.trim(), true)
+        } else if let Some(t) = task.strip_prefix('~') {
             (t.trim(), false)
         } else {
-            (task, true)
+            (task, false)
         };
 
         if task_str.is_empty() {
@@ -69,13 +62,16 @@ pub fn interactive() {
         let args = SummonArgs {
             task: task_str.to_string(),
             execute_agents: execute,
-            allow_dirty: true,
+            allow_dirty: false,
             lang,
         };
 
         if let Err(e) = run_summon(args) {
             let lang2 = detect(task_str);
-            eprintln!("{}", msg(&lang2, &format!("Error: {}", e), &format!("오류: {}", e)));
+            eprintln!(
+                "{}",
+                msg(&lang2, &format!("Error: {}", e), &format!("오류: {}", e))
+            );
         }
     }
 }
@@ -88,10 +84,6 @@ pub fn print_intro() {
     println!("  wisp doctor");
     println!("  wisp summon \"<task>\"");
 }
-
-// ---------------------------------------------------------------------------
-// wisp init [--force]
-// ---------------------------------------------------------------------------
 
 pub fn init(force: bool) {
     let wisp_toml = Path::new("wisp.toml");
@@ -127,10 +119,6 @@ pub fn init(force: bool) {
     println!("\nWisp initialized. Edit wisp.toml to configure agents and workflow.");
 }
 
-// ---------------------------------------------------------------------------
-// wisp doctor
-// ---------------------------------------------------------------------------
-
 pub fn doctor() {
     println!("Wisp Doctor\n");
 
@@ -147,14 +135,14 @@ pub fn doctor() {
     }
 
     let claude_ok = cmd_available("claude", "--version");
-    check("Claude CLI — implementer + reviewer  [--execute-agents]", claude_ok);
+    check("Claude CLI - implementer + reviewer  [--execute-agents]", claude_ok);
     if !claude_ok {
         println!("    npm install -g @anthropic-ai/claude-code");
         println!("    (not needed for dry-run mode)");
     }
 
     let codex_ok = cmd_available("codex", "--version");
-    check("Codex CLI  — patcher + shipper       [--execute-agents]", codex_ok);
+    check("Codex CLI  - patcher + shipper       [--execute-agents]", codex_ok);
     if !codex_ok {
         println!("    npm install -g @openai/codex");
         println!("    (not needed for dry-run mode)");
@@ -198,10 +186,6 @@ fn cmd_available(cmd: &str, arg: &str) -> bool {
         .unwrap_or(false)
 }
 
-// ---------------------------------------------------------------------------
-// wisp summon "<task>" [--execute-agents] [--allow-dirty]
-// ---------------------------------------------------------------------------
-
 pub fn summon(task: &str, execute_agents: bool, allow_dirty: bool) {
     let lang = detect(task);
 
@@ -211,7 +195,7 @@ pub fn summon(task: &str, execute_agents: bool, allow_dirty: bool) {
             msg(
                 &lang,
                 "Error: wisp.toml not found. Run `wisp init` first.",
-                "오류: wisp.toml 파일을 찾을 수 없습니다. 먼저 `wisp init`을 실행하세요."
+                "오류: wisp.toml을 찾을 수 없습니다. 먼저 `wisp init`을 실행하세요."
             )
         );
         std::process::exit(1);
@@ -225,7 +209,6 @@ pub fn summon(task: &str, execute_agents: bool, allow_dirty: bool) {
     };
 
     if let Err(e) = run_summon(args) {
-        // lang is moved — detect again for the error message
         let lang2 = detect(task);
         eprintln!(
             "{}",
