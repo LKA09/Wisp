@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread;
 use std::time::Duration;
@@ -101,13 +101,13 @@ pub fn on_resize() {
 // ─── Live command completions ─────────────────────────────────────────────────
 
 const COMPLETIONS: &[(&str, &str)] = &[
-    ("/run",    "execute workflow interactively"),
-    ("/auto",   "execute workflow (auto-approve)"),
+    ("/run", "execute workflow interactively"),
+    ("/auto", "execute workflow (auto-approve)"),
     ("/claude", "run Claude directly"),
-    ("/codex",  "run Codex directly"),
-    ("/help",   "show commands"),
-    ("/exit",   "exit wisp"),
-    ("/quit",   "exit wisp"),
+    ("/codex", "run Codex directly"),
+    ("/help", "show commands"),
+    ("/exit", "exit wisp"),
+    ("/quit", "exit wisp"),
 ];
 
 pub fn completions_for(input: &str) -> Vec<(&'static str, &'static str)> {
@@ -198,13 +198,13 @@ pub fn interactive_header() {
     let rule = heavy_rule();
     println!("{rule}");
     println!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp{RESET}  {GRAY}—{RESET}  local coding agent");
-    println!(
-        "     {GRAY}Claude implements · Codex ships · you stay in control{RESET}"
-    );
+    println!("     {GRAY}Claude implements · Codex ships · you stay in control{RESET}");
     println!("{rule}");
     println!();
     println!("  Type a task and press Enter {GRAY}—{RESET} default is dry-run preview.");
-    println!("  {GRAY}Default is dry-run.  Use {WHITE}/run{GRAY} to execute  ·  {WHITE}exit{GRAY} to quit.{RESET}");
+    println!(
+        "  {GRAY}Default is dry-run.  Use {WHITE}/run{GRAY} to execute  ·  {WHITE}exit{GRAY} to quit.{RESET}"
+    );
     println!();
 }
 
@@ -253,13 +253,16 @@ pub fn interactive_help() {
 
 pub fn interactive_command_preview(query: &str) {
     let all: &[(&str, &str)] = &[
-        ("run",    "/run <task>      —  execute workflow interactively"),
-        ("auto",   "/auto <task>     —  execute workflow (auto-approve)"),
+        ("run", "/run <task>      —  execute workflow interactively"),
+        (
+            "auto",
+            "/auto <task>     —  execute workflow (auto-approve)",
+        ),
         ("claude", "/claude <task>   —  run Claude directly"),
-        ("codex",  "/codex <task>    —  run Codex directly"),
-        ("help",   "/help            —  show all commands"),
-        ("exit",   "/exit            —  exit wisp"),
-        ("quit",   "/quit            —  exit wisp"),
+        ("codex", "/codex <task>    —  run Codex directly"),
+        ("help", "/help            —  show all commands"),
+        ("exit", "/exit            —  exit wisp"),
+        ("quit", "/quit            —  exit wisp"),
     ];
 
     let matches: Vec<&str> = if query.is_empty() {
@@ -315,7 +318,9 @@ pub fn header(task: &str, branch: &str, mode: &str, instruction_files: usize) {
 
 pub fn agent_start(agent: &str, role: &str, step: usize, total: usize) {
     let name = agent_display(agent);
-    println!("  {GRAY}┌─{RESET} {BOLD}[{step}/{total}]{RESET}  {ACCENT}{name}{RESET}  {GRAY}—  {role}{RESET}");
+    println!(
+        "  {GRAY}┌─{RESET} {BOLD}[{step}/{total}]{RESET}  {ACCENT}{name}{RESET}  {GRAY}—  {role}{RESET}"
+    );
     println!();
 }
 
@@ -354,9 +359,7 @@ pub fn finish(session_path: &str, is_dry_run: bool) {
             "  {ACCENT}✦{RESET}  {GREEN}{BOLD}done{RESET}  {GRAY}—  dry-run complete · no changes were made{RESET}"
         );
     } else {
-        println!(
-            "  {ACCENT}✦{RESET}  {GREEN}{BOLD}done{RESET}  {GRAY}—  workflow complete{RESET}"
-        );
+        println!("  {ACCENT}✦{RESET}  {GREEN}{BOLD}done{RESET}  {GRAY}—  workflow complete{RESET}");
     }
     println!("{rule}");
     println!();
@@ -386,7 +389,9 @@ pub fn init_exists(path: &str) {
 }
 
 pub fn init_overwrite_hint() {
-    println!("  {YELLOW}!{RESET}  {BOLD}wisp.toml{RESET} already exists  {GRAY}—  use --force to overwrite{RESET}");
+    println!(
+        "  {YELLOW}!{RESET}  {BOLD}wisp.toml{RESET} already exists  {GRAY}—  use --force to overwrite{RESET}"
+    );
 }
 
 pub fn init_done() {
@@ -438,9 +443,7 @@ pub fn doctor_summary(env_ok: bool, agents_ok: bool) {
     } else {
         println!("  {RED}✗  some checks failed{RESET}");
         println!();
-        println!(
-            "  {GRAY}Run {WHITE}wisp init{GRAY} and install missing tools.{RESET}"
-        );
+        println!("  {GRAY}Run {WHITE}wisp init{GRAY} and install missing tools.{RESET}");
     }
     println!();
 }

@@ -86,8 +86,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
 
     // ── Step 1: implement (always once) ───────────────────────────────────────
     step += 1;
-    let impl_prompt =
-        build_implement_prompt(&normalized_task_en, &args.task, &instructions_text);
+    let impl_prompt = build_implement_prompt(&normalized_task_en, &args.task, &instructions_text);
     run_workflow_step(
         &config,
         &session,
@@ -132,8 +131,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         } else {
             "patch".to_string()
         };
-        let patch_prompt =
-            build_patch_prompt(&normalized_task_en, &args.task, &instructions_text);
+        let patch_prompt = build_patch_prompt(&normalized_task_en, &args.task, &instructions_text);
         run_workflow_step(
             &config,
             &session,
@@ -489,7 +487,12 @@ fn run_workflow_step(
         true => display::agent_end(agent, output.status == 0),
         false => {
             display::agent_end(agent, false);
-            bail!(format_policy_violation_error(agent, role, &violations, &args.lang));
+            bail!(format_policy_violation_error(
+                agent,
+                role,
+                &violations,
+                &args.lang
+            ));
         }
     }
 
@@ -976,7 +979,11 @@ fn finalize_workflow_summary(
             session.path().display(),
             instructions.files.len(),
             instructions.total_bytes,
-            if instructions.truncated { ", truncated" } else { "" },
+            if instructions.truncated {
+                ", truncated"
+            } else {
+                ""
+            },
             config.workflow.implementer,
             config.workflow.patcher,
             config.workflow.reviewer,
@@ -1019,7 +1026,11 @@ fn finalize_single_agent_summary(
             session.path().display(),
             instructions.files.len(),
             instructions.total_bytes,
-            if instructions.truncated { ", truncated" } else { "" },
+            if instructions.truncated {
+                ", truncated"
+            } else {
+                ""
+            },
         ),
     )
 }

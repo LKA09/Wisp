@@ -1,4 +1,4 @@
-﻿use std::fs;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -189,10 +189,17 @@ fn dispatch(trimmed: &str) -> bool {
         InteractiveAction::DryRunWorkflow { task } => {
             run_summon_command(&task, false, false, PermissionMode::Interactive);
         }
-        InteractiveAction::ExecuteWorkflow { task, permission_mode } => {
+        InteractiveAction::ExecuteWorkflow {
+            task,
+            permission_mode,
+        } => {
             run_summon_command(&task, true, false, permission_mode);
         }
-        InteractiveAction::ExecuteSingleAgent { agent, task, permission_mode } => {
+        InteractiveAction::ExecuteSingleAgent {
+            agent,
+            task,
+            permission_mode,
+        } => {
             run_single_agent_command(&agent, &task, true, false, permission_mode);
         }
     }
@@ -201,10 +208,7 @@ fn dispatch(trimmed: &str) -> bool {
 
 /// Raw-mode interactive loop: reads one character at a time and shows live
 /// command completions when the user types a `/` prefix.
-fn interactive_raw(
-    raw: crate::input::RawConsole,
-    resize_rx: std::sync::mpsc::Receiver<()>,
-) {
+fn interactive_raw(raw: crate::input::RawConsole, resize_rx: std::sync::mpsc::Receiver<()>) {
     loop {
         let Some(line) = read_raw_line(&raw, &resize_rx) else {
             break;
@@ -276,7 +280,11 @@ fn interactive_lines(resize_rx: std::sync::mpsc::Receiver<()>) {
         let stdin = io::stdin();
         for line in stdin.lock().lines() {
             match line {
-                Ok(l) => { if tx.send(l).is_err() { break; } }
+                Ok(l) => {
+                    if tx.send(l).is_err() {
+                        break;
+                    }
+                }
                 Err(_) => break,
             }
         }
@@ -312,11 +320,14 @@ fn interactive_lines(resize_rx: std::sync::mpsc::Receiver<()>) {
         };
 
         let trimmed = input.trim();
-        if trimmed.is_empty() { continue; }
-        if !dispatch(trimmed) { break; }
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !dispatch(trimmed) {
+            break;
+        }
     }
 }
-
 
 pub fn init(force: bool) {
     use crate::display;
@@ -364,7 +375,11 @@ pub fn doctor() {
     display::doctor_header();
 
     let git_ok = git::git_available();
-    display::doctor_check("git installed", git_ok, Some("install: https://git-scm.com/downloads"));
+    display::doctor_check(
+        "git installed",
+        git_ok,
+        Some("install: https://git-scm.com/downloads"),
+    );
 
     let git_repo = git::is_git_repo();
     display::doctor_check("git repository", git_repo, Some("run: git init"));
@@ -373,7 +388,11 @@ pub fn doctor() {
     display::doctor_check("wisp.toml exists", config_ok, Some("run: wisp init"));
 
     let sessions_ok = Path::new(".wisp/sessions").exists();
-    display::doctor_check(".wisp/sessions/ exists", sessions_ok, Some("run: wisp init"));
+    display::doctor_check(
+        ".wisp/sessions/ exists",
+        sessions_ok,
+        Some("run: wisp init"),
+    );
 
     println!();
 
@@ -574,5 +593,4 @@ mod tests {
             InteractiveAction::PreviewCommands { query: "co".into() }
         );
     }
-
 }
