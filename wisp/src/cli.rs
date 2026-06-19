@@ -148,16 +148,6 @@ pub fn summon(task: &str, execute_agents: bool, allow_dirty: bool) {
         std::process::exit(1);
     }
 
-    println!(
-        "{}",
-        msg(
-            &lang,
-            &format!("Summoning agents for task: {}", task),
-            &format!("다음 작업을 위해 에이전트를 소환합니다: {}", task)
-        )
-    );
-    println!();
-
     let args = SummonArgs {
         task: task.to_string(),
         execute_agents,

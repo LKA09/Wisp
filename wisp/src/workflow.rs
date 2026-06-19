@@ -1,7 +1,8 @@
 use anyhow::Result;
 
-use crate::agent::{AgentConfig as RunnerConfig, AgentRunner, DryRunRunner, SubprocessRunner};
+use crate::agent::{AgentConfig as RunnerConfig, DryRunRunner, SubprocessRunner};
 use crate::config::Config;
+use crate::display;
 use crate::git;
 use crate::instructions::{load_instructions, LoadedInstructions};
 use crate::language::{msg, Language};
@@ -20,22 +21,8 @@ pub fn summon(args: SummonArgs) -> Result<()> {
     // 1. Load config
     let config = Config::load()?;
 
-    println!("{}", msg(lang, "Loading project instructions...", "프로젝트 지시사항을 불러오는 중..."));
-
     // 2. Load project instruction files
     let instructions = load_instructions(&config);
-    if !instructions.files.is_empty() {
-        println!(
-            "{}",
-            msg(
-                lang,
-                &format!("  Loaded {} instruction file(s) ({} bytes)", instructions.files.len(), instructions.total_bytes),
-                &format!("  지시사항 파일 {}개 로드됨 ({} 바이트)", instructions.files.len(), instructions.total_bytes)
-            )
-        );
-    } else {
-        println!("{}", msg(lang, "  No instruction files found.", "  지시사항 파일 없음."));
-    }
 
     // 3. Check git working tree
     if !args.allow_dirty {
@@ -44,15 +31,23 @@ pub fn summon(args: SummonArgs) -> Result<()> {
                 "{}",
                 msg(
                     lang,
-                    "Warning: Working tree has uncommitted changes. Use --allow-dirty to proceed anyway.",
+                    "Warning: working tree has uncommitted changes. Use --allow-dirty to proceed.",
                     "경고: 커밋되지 않은 변경사항이 있습니다. --allow-dirty 플래그를 사용하면 계속할 수 있습니다."
                 )
             );
         }
     }
 
-    // 4. Create session directory
-    println!("{}", msg(lang, "Creating session...", "세션을 생성하는 중..."));
+    let branch = git::current_branch()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "unknown".to_string());
+    let mode = if args.execute_agents { "execute" } else { "dry-run" };
+
+    // ── Conversation header ──────────────────────────────────────────────────
+    display::header(&args.task, &branch, mode, instructions.files.len());
+
+    // 4. Create session
     let session = Session::create()?;
 
     // 5. Build prompts
@@ -60,26 +55,19 @@ pub fn summon(args: SummonArgs) -> Result<()> {
     let instructions_text = instructions.combined();
 
     let implement_prompt = build_implement_prompt(&normalized_task_en, &args.task, &instructions_text);
-    let patch_prompt = build_patch_prompt(&normalized_task_en, &args.task, &instructions_text);
-    let review_prompt = build_review_prompt(&normalized_task_en, &args.task);
-    let ship_prompt = build_ship_prompt(&normalized_task_en, &args.task);
+    let patch_prompt     = build_patch_prompt(&normalized_task_en, &args.task, &instructions_text);
+    let review_prompt    = build_review_prompt(&normalized_task_en, &args.task);
+    let ship_prompt      = build_ship_prompt(&normalized_task_en, &args.task);
 
-    // 6. Save session files
+    // 6. Save session files (silent — conversation UI is the focus)
     session.write("task.original.txt", &args.task)?;
-    session.write(
-        "task.normalized.en.md",
-        &format!("# Normalized Task (English)\n\n{}\n", normalized_task_en),
-    )?;
-    session.write(
-        "instructions.loaded.md",
-        &format!("# Loaded Project Instructions\n\n{}", instructions_text),
-    )?;
+    session.write("task.normalized.en.md", &format!("# Normalized Task (English)\n\n{}\n", normalized_task_en))?;
+    session.write("instructions.loaded.md", &format!("# Loaded Project Instructions\n\n{}", instructions_text))?;
     session.write("prompts/claude.implement.en.md", &implement_prompt)?;
     session.write("prompts/codex.patch.en.md", &patch_prompt)?;
     session.write("prompts/claude.review.en.md", &review_prompt)?;
     session.write("prompts/codex.ship.en.md", &ship_prompt)?;
 
-    // 7. Save git info
     match git::status() {
         Ok(s) => session.write("git/status.txt", &s)?,
         Err(_) => session.write("git/status.txt", "(git status unavailable)")?,
@@ -89,70 +77,115 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         _ => session.write("git/diff.patch", "(no diff)")?,
     }
 
-    // 8. Run agents or write dry-run placeholders
-    if args.execute_agents {
-        println!("{}", msg(lang, "Running agents...", "에이전트를 실행하는 중..."));
-        run_agents(&config, &session, lang, &implement_prompt, &patch_prompt, &review_prompt, &ship_prompt, false)?;
-    } else {
-        println!("{}", msg(lang, "Dry-run mode. Writing placeholder outputs.", "드라이런 모드. 플레이스홀더 출력을 작성합니다."));
-        run_agents(&config, &session, lang, &implement_prompt, &patch_prompt, &review_prompt, &ship_prompt, true)?;
+    // ── Agent conversation ───────────────────────────────────────────────────
+    let steps: &[(&str, &str, &str, &str)] = &[
+        ("claude", "implement", &implement_prompt, "outputs/claude.implement.out.md"),
+        ("codex",  "patch",     &patch_prompt,     "outputs/codex.patch.out.md"),
+        ("claude", "review",    &review_prompt,     "outputs/claude.review.out.md"),
+        ("codex",  "ship",      &ship_prompt,       "outputs/codex.ship.out.md"),
+    ];
+
+    let cwd = std::env::current_dir()?;
+    let total = steps.len();
+
+    for (i, &(agent, role, prompt, out_file)) in steps.iter().enumerate() {
+        let step = i + 1;
+
+        // Handoff narration between steps
+        if i > 0 {
+            let prev_agent = steps[i - 1].0;
+            let handoff = handoff_note(prev_agent, agent, role, lang);
+            display::wisp_note(&handoff);
+        }
+
+        display::agent_start(agent, role, step, total);
+
+        let cfg = config.agents.get(agent).cloned().unwrap_or_else(|| {
+            crate::config::AgentConfig {
+                cmd: agent.to_string(),
+                args: vec!["-p".to_string()],
+            }
+        });
+
+        let runner_cfg = RunnerConfig {
+            name: agent.to_string(),
+            cmd: cfg.cmd.clone(),
+            args: cfg.args.clone(),
+        };
+
+        let (ok, output) = if args.execute_agents {
+            let runner = SubprocessRunner { config: runner_cfg };
+            match runner.run_streaming(prompt, &cwd, |line| display::agent_line(line)) {
+                Ok(out) => {
+                    if !out.stderr.is_empty() {
+                        display::agent_blank();
+                        for line in out.stderr.lines() {
+                            display::agent_line(&format!("\x1b[90m[stderr] {}\x1b[0m", line));
+                        }
+                    }
+                    let ok = out.status == 0;
+                    (ok, out)
+                }
+                Err(e) => {
+                    display::agent_line(&format!("\x1b[91merror: {}\x1b[0m", e));
+                    let out = crate::agent::AgentOutput {
+                        status: -1,
+                        stdout: String::new(),
+                        stderr: e.to_string(),
+                    };
+                    (false, out)
+                }
+            }
+        } else {
+            let runner = DryRunRunner { config: runner_cfg };
+            let out = runner.display_and_capture(prompt);
+            (true, out)
+        };
+
+        display::agent_end(agent, ok);
+
+        let content = format!(
+            "# {} — {} Output\n\nExit status: {}\n\n## stdout\n\n{}\n\n## stderr\n\n{}\n",
+            display::agent_display(agent), role, output.status, output.stdout, output.stderr
+        );
+        session.write(out_file, &content)?;
     }
 
     // 9. Write summary
-    let branch = git::current_branch()
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "unknown".to_string());
-    let mode = if args.execute_agents { "execute" } else { "dry-run" };
     let summary = build_summary(&args.task, &normalized_task_en, &branch, mode, &session, &instructions);
     session.write("summary.md", &summary)?;
 
-    // 10. Final output
-    println!();
-    println!(
-        "{}",
-        msg(
-            lang,
-            &format!("Session saved to: {}", session.path().display()),
-            &format!("세션이 저장되었습니다: {}", session.path().display())
-        )
-    );
-    if !args.execute_agents {
-        println!(
-            "{}",
-            msg(
-                lang,
-                "Tip: Pass --execute-agents to invoke real Claude and Codex CLIs.",
-                "팁: --execute-agents 플래그를 사용하면 실제 Claude와 Codex CLI를 실행합니다."
-            )
-        );
-    }
-    println!("{}", msg(lang, "Done.", "완료."));
+    // ── Footer ───────────────────────────────────────────────────────────────
+    display::finish(&session.path().display().to_string(), !args.execute_agents);
 
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Task normalization
-// ---------------------------------------------------------------------------
+// ─── Handoff narration ────────────────────────────────────────────────────────
+
+fn handoff_note(from: &str, to: &str, role: &str, lang: &Language) -> String {
+    let from_name = display::agent_display(from);
+    let to_name   = display::agent_display(to);
+    match lang {
+        Language::Korean => format!("{} 완료. {} → {} ({})로 전달합니다.", from_name, from_name, to_name, role),
+        Language::English => format!("{} done. Handing off to {} ({}).", from_name, to_name, role),
+    }
+}
+
+// ─── Task normalization ───────────────────────────────────────────────────────
 
 fn normalize_task_en(task: &str, lang: &Language) -> String {
     match lang {
         Language::English => task.to_string(),
-        Language::Korean => {
-            // MVP placeholder — production would use a translation API or LLM.
-            format!(
-                "[Translated from Korean] Original task: \"{}\"\n\
-                 (Perform the task described in the original Korean text.)",
-                task
-            )
-        }
+        Language::Korean => format!(
+            "[Translated from Korean] Original task: \"{}\"\n\
+             (Perform the task described in the original Korean text.)",
+            task
+        ),
     }
 }
 
-// ---------------------------------------------------------------------------
-// Prompt builders (internal — always English)
-// ---------------------------------------------------------------------------
+// ─── Prompt builders (internal — always English) ──────────────────────────────
 
 fn build_implement_prompt(normalized_task_en: &str, original_task: &str, instructions: &str) -> String {
     format!(
@@ -280,88 +313,7 @@ Output:
     )
 }
 
-// ---------------------------------------------------------------------------
-// Agent execution
-// ---------------------------------------------------------------------------
-
-struct AgentStep<'a> {
-    agent_name: &'a str,
-    role: &'a str,
-    prompt: &'a str,
-    output_file: &'a str,
-}
-
-fn run_agents(
-    config: &Config,
-    session: &Session,
-    lang: &Language,
-    implement_prompt: &str,
-    patch_prompt: &str,
-    review_prompt: &str,
-    ship_prompt: &str,
-    dry_run: bool,
-) -> Result<()> {
-    let steps = [
-        AgentStep { agent_name: "claude", role: "implement", prompt: implement_prompt, output_file: "outputs/claude.implement.out.md" },
-        AgentStep { agent_name: "codex",  role: "patch",     prompt: patch_prompt,     output_file: "outputs/codex.patch.out.md" },
-        AgentStep { agent_name: "claude", role: "review",    prompt: review_prompt,    output_file: "outputs/claude.review.out.md" },
-        AgentStep { agent_name: "codex",  role: "ship",      prompt: ship_prompt,      output_file: "outputs/codex.ship.out.md" },
-    ];
-
-    let cwd = std::env::current_dir()?;
-
-    for step in &steps {
-        let label_en = format!("  {} ({})", step.agent_name, step.role);
-        let label_ko = format!("  {} ({}) 실행 중...", step.agent_name, step.role);
-        println!("{}", msg(lang, &label_en, &label_ko));
-
-        let cfg = config.agents.get(step.agent_name).cloned().unwrap_or_else(|| {
-            crate::config::AgentConfig {
-                cmd: step.agent_name.to_string(),
-                args: vec!["-p".to_string()],
-            }
-        });
-
-        let runner_config = RunnerConfig {
-            name: step.agent_name.to_string(),
-            cmd: cfg.cmd,
-            args: cfg.args,
-        };
-
-        let output = if dry_run {
-            DryRunRunner { config: runner_config }.run(step.prompt, &cwd)?
-        } else {
-            match (SubprocessRunner { config: runner_config }).run(step.prompt, &cwd) {
-                Ok(o) => o,
-                Err(e) => {
-                    let msg_text = msg(
-                        lang,
-                        &format!("  Error running {}: {}", step.agent_name, e),
-                        &format!("  {} 실행 오류: {}", step.agent_name, e),
-                    );
-                    eprintln!("{}", msg_text);
-                    session.write(
-                        step.output_file,
-                        &format!("# {} - {} Error\n\nFailed to run agent: {}\n", step.agent_name, step.role, e),
-                    )?;
-                    continue;
-                }
-            }
-        };
-
-        let content = format!(
-            "# {} - {} Output\n\nExit status: {}\n\n## stdout\n\n{}\n\n## stderr\n\n{}\n",
-            step.agent_name, step.role, output.status, output.stdout, output.stderr
-        );
-        session.write(step.output_file, &content)?;
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Summary
-// ---------------------------------------------------------------------------
+// ─── Summary ──────────────────────────────────────────────────────────────────
 
 fn build_summary(
     original_task: &str,

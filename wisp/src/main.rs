@@ -1,6 +1,7 @@
 mod agent;
 mod cli;
 mod config;
+mod display;
 mod error;
 mod git;
 mod instructions;
@@ -46,6 +47,11 @@ enum Commands {
 }
 
 fn main() {
+    // Enable ANSI color output on Windows (needed for cmd.exe / older PowerShell).
+    // Windows Terminal and PowerShell 7+ already support ANSI by default.
+    #[cfg(windows)]
+    enable_ansi_windows();
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -58,6 +64,30 @@ fn main() {
             allow_dirty,
         }) => {
             cli::summon(&task, execute_agents, allow_dirty);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn enable_ansi_windows() {
+    // Set ENABLE_VIRTUAL_TERMINAL_PROCESSING on the Windows console.
+    // Best-effort; fails silently when output is piped or on old Windows.
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetStdHandle(nStdHandle: u32) -> *mut std::ffi::c_void;
+        fn GetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, lpMode: *mut u32) -> i32;
+        fn SetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, dwMode: u32) -> i32;
+    }
+
+    const STD_OUTPUT_HANDLE: u32 = 0xFFFFFFF5;
+    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
+
+    unsafe {
+        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        if handle.is_null() { return; }
+        let mut mode: u32 = 0;
+        if GetConsoleMode(handle, &mut mode) != 0 {
+            SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
         }
     }
 }
