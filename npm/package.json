@@ -1,5 +1,5 @@
 {
-  "name": "@lir09/wisp",
+  "name": "@lka09/wisp",
   "version": "0.1.0",
   "description": "A local personal coding agent for Claude and Codex CLI.",
   "bin": {
