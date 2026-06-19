@@ -56,7 +56,7 @@ wisp summon "인증 모듈에 에러 핸들링 추가해줘"
 ### npm (권장)
 
 ```bash
-npm install -g @lir09/wisp
+npm install -g @lka09/wisp
 ```
 
 postinstall 스크립트가 현재 플랫폼에 맞는 바이너리를 GitHub Releases에서 자동으로 다운로드합니다.
