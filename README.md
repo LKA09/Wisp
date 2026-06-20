@@ -399,6 +399,63 @@ Wisp is built around the principle that **agents should suggest, not decide**.
 
 ---
 
+## Publishing
+
+> This section is for maintainers who publish Wisp releases to GitHub and npm.
+
+### Release order
+
+1. **Bump versions** in both files:
+   - `wisp/Cargo.toml` — `version = "x.y.z"`
+   - `npm/package.json` — `"version": "x.y.z"`
+
+2. **Run local validation:**
+
+   ```sh
+   cargo fmt --check --manifest-path wisp/Cargo.toml
+   cargo clippy --manifest-path wisp/Cargo.toml -- -D warnings
+   cargo test --manifest-path wisp/Cargo.toml
+   npm pack --dry-run --prefix npm
+   ```
+
+3. **Create and push a version tag** (or trigger the Release workflow manually with the same tag):
+
+   ```sh
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+4. **Confirm all GitHub Release assets are present** before continuing:
+   - `wisp-windows-x86_64.exe`
+   - `wisp-windows-aarch64.exe`
+   - `wisp-linux-x86_64`
+   - `wisp-linux-aarch64`
+   - `wisp-darwin-x86_64`
+   - `wisp-darwin-aarch64`
+
+5. **Verify the npm package one final time:**
+
+   ```sh
+   npm pack --dry-run --prefix npm
+   ```
+
+6. **Publish:**
+
+   ```sh
+   cd npm
+   npm publish
+   ```
+
+### Important: publish order matters
+
+The npm postinstall script is intentionally non-fatal — if the binary download fails it prints a source-build fallback message and exits cleanly. This means `npm publish` will succeed even if no GitHub Release assets exist yet. **Publish to npm only after all GitHub Release assets are confirmed**, otherwise users may install the package but get a missing-binary error at runtime.
+
+### Windows ARM64 note
+
+The `wisp-windows-aarch64.exe` asset requires a GitHub-hosted Windows ARM64 runner. If that runner type is unavailable at release time, omit the Windows ARM64 asset and either remove it from the supported-platforms table or mark it as source-build only.
+
+---
+
 ## Contributing
 
 ```sh
