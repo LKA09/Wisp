@@ -310,7 +310,7 @@ cmd   = "claude"
 args  = ["-p", "{prompt}"]
 input = "arg"
 permission_interactive_args = []
-permission_auto_args         = ["--dangerously-skip-permissions"]
+permission_auto_args         = []
 permission_skip_args         = []
 
 [agents.codex]
@@ -318,7 +318,7 @@ cmd   = "codex"
 args  = ["exec", "-s", "workspace-write", "{prompt}"]
 input = "arg"
 permission_interactive_args = []
-permission_auto_args         = ["--full-auto"]
+permission_auto_args         = []
 permission_skip_args         = []
 
 [workflow]
@@ -341,6 +341,7 @@ files = [
   ".wisp/instructions.md",
   "WISP.md",
   "AGENTS.md",
+  "AGENT.md",
   "CLAUDE.md",
   "CODEX.md",
 ]
@@ -349,7 +350,7 @@ include_agent_specific = true
 
 [policy]
 protected_branches = ["main", "master"]
-protected_paths    = [".env", ".env.local", ".git", "id_rsa", "secrets.toml"]
+protected_paths    = [".env", ".env.local", ".git", "id_rsa", "secrets.toml", "credentials.json"]
 deny_commands      = ["git push --force", "cargo publish", "npm publish", "rm -rf /"]
 ```
 
@@ -375,7 +376,7 @@ Create `.wisp/instructions.md` to inject project context into every agent prompt
 - Commit messages must follow Conventional Commits.
 ```
 
-`AGENTS.md`, `CLAUDE.md`, `CODEX.md`, and `WISP.md` are loaded automatically if they exist.
+`AGENTS.md`, `AGENT.md`, `CLAUDE.md`, `CODEX.md`, and `WISP.md` are loaded automatically if they exist.
 
 ---
 

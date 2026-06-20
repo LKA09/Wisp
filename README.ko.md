@@ -311,7 +311,7 @@ cmd   = "claude"
 args  = ["-p", "{prompt}"]
 input = "arg"
 permission_interactive_args = []
-permission_auto_args         = ["--dangerously-skip-permissions"]
+permission_auto_args         = []
 permission_skip_args         = []
 
 [agents.codex]
@@ -319,7 +319,7 @@ cmd   = "codex"
 args  = ["exec", "-s", "workspace-write", "{prompt}"]
 input = "arg"
 permission_interactive_args = []
-permission_auto_args         = ["--full-auto"]
+permission_auto_args         = []
 permission_skip_args         = []
 
 [workflow]
@@ -342,6 +342,7 @@ files = [
   ".wisp/instructions.md",
   "WISP.md",
   "AGENTS.md",
+  "AGENT.md",
   "CLAUDE.md",
   "CODEX.md",
 ]
@@ -350,7 +351,7 @@ include_agent_specific = true
 
 [policy]
 protected_branches = ["main", "master"]
-protected_paths    = [".env", ".env.local", ".git", "id_rsa", "secrets.toml"]
+protected_paths    = [".env", ".env.local", ".git", "id_rsa", "secrets.toml", "credentials.json"]
 deny_commands      = ["git push --force", "cargo publish", "npm publish", "rm -rf /"]
 ```
 
@@ -376,7 +377,7 @@ deny_commands      = ["git push --force", "cargo publish", "npm publish", "rm -r
 - 커밋 메시지는 Conventional Commits 형식을 따른다.
 ```
 
-`AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `WISP.md`가 있으면 자동으로 함께 불러온다.
+`AGENTS.md`, `AGENT.md`, `CLAUDE.md`, `CODEX.md`, `WISP.md`가 있으면 자동으로 함께 불러온다.
 
 ---
 
