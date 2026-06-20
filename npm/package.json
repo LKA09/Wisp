@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "A local personal coding agent for Claude and Codex CLI.",
   "bin": {
-    "wisp": "./bin/wisp.js"
+    "wisp": "bin/wisp.js"
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
@@ -13,7 +13,8 @@
     "bin",
     "dist",
     "scripts",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=16"
@@ -21,7 +22,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LKA09/Wisp"
+    "url": "git+https://github.com/LKA09/Wisp.git"
+  },
+  "homepage": "https://github.com/LKA09/Wisp#readme",
+  "bugs": {
+    "url": "https://github.com/LKA09/Wisp/issues"
   },
   "keywords": [
     "ai",
