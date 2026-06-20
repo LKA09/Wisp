@@ -1,50 +1,36 @@
 # Releasing Wisp
 
-## Release checklist
+> **See [`RELEASE.md`](RELEASE.md) for the full, up-to-date release guide.**
 
-1. **Bump versions** — update both in sync:
-   - `wisp/Cargo.toml` → `version = "X.Y.Z"`
-   - `npm/package.json` → `"version": "X.Y.Z"`
+## Quick reference
 
-2. **Build release binaries** for each target:
-   ```bash
-   # Windows (x86_64)
-   cargo build --release
-   cp target/release/wisp.exe ../npm/dist/wisp.exe   # for local testing
+The release workflow (`.github/workflows/release.yml`) is fully automated:
+- Triggers on `push: tags: ['v*']` or via **Actions → Release → Run workflow**.
+- Builds all six platform binaries and uploads them to a GitHub Release.
+- If the release already exists, assets are replaced (`--clobber`).
 
-   # Linux (x86_64) — cross-compile or build on Linux CI
-   cargo build --release --target x86_64-unknown-linux-musl
+## Expected release asset names
 
-   # macOS (arm64) — build on Apple Silicon or use cross
-   cargo build --release --target aarch64-apple-darwin
-   ```
+All six must be present on the GitHub Release before running `npm publish`:
 
-3. **Name release assets** using this convention:
-   ```
-   wisp-windows-x86_64.exe
-   wisp-linux-x86_64
-   wisp-darwin-aarch64
-   wisp-darwin-x86_64
-   ```
+```
+wisp-windows-x86_64.exe
+wisp-windows-aarch64.exe
+wisp-linux-x86_64
+wisp-linux-aarch64
+wisp-darwin-x86_64
+wisp-darwin-aarch64
+```
 
-4. **Create a GitHub Release** tagged `vX.Y.Z` and upload the binaries above.
-   The `npm/scripts/postinstall.js` downloads assets from this exact URL pattern:
-   ```
-   https://github.com/LKA09/Wisp/releases/download/vX.Y.Z/<asset-name>
-   ```
+These names are hard-coded in `npm/scripts/postinstall.js` and `npm/bin/wisp.js`.
 
-5. **Publish to npm:**
-   ```bash
-   cd npm
-   npm publish --access public
-   ```
+## Publish order
 
-## TODO: Automate with GitHub Actions
+1. Bump `version` in `wisp/Cargo.toml` and `npm/package.json` (must match).
+2. Run local validation: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `npm pack --dry-run`.
+3. Commit, tag, and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+4. Wait for the Release workflow to finish and confirm all six assets are live.
+5. `cd npm && npm publish --access public`
 
-A release workflow (`.github/workflows/release.yml`) should:
-- Trigger on `push: tags: ['v*']`
-- Build all four targets via a matrix job (Linux musl cross-compile, Windows, macOS arm64/x64)
-- Upload artifacts to the GitHub Release
-- Run `npm publish` after all binaries are attached
-
-This is not yet implemented. Until then, releases are manual.
+> The npm postinstall download is non-fatal — if assets are missing at install time,
+> users see a warning and must build from source. Publish to npm only after assets are confirmed.
