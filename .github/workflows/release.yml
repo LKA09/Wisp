@@ -103,7 +103,7 @@ jobs:
 
   build-windows-aarch64:
     name: Windows ARM64
-    runs-on: windows-11-arm
+    runs-on: windows-11-arm   # GitHub-hosted ARM64 Windows runner (GA, public repos)
     defaults:
       run:
         working-directory: wisp
@@ -154,7 +154,7 @@ jobs:
 
   build-macos-aarch64:
     name: macOS Apple Silicon
-    runs-on: macos-latest   # Apple Silicon runner (arm64) as of macOS 14+
+    runs-on: macos-14        # Explicit Apple Silicon (arm64) runner
     defaults:
       run:
         working-directory: wisp
