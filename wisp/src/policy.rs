@@ -9,6 +9,7 @@ pub enum ApprovalDecision {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ApprovalEvent {
     Push,
     Commit,

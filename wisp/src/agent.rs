@@ -22,6 +22,7 @@ pub enum AgentInputMode {
 
 #[derive(Debug, Clone)]
 pub struct AgentRunOptions {
+    #[allow(dead_code)]
     pub permission_mode: PermissionMode,
     pub input_mode: AgentInputMode,
     pub capture_output: bool,
@@ -46,6 +47,7 @@ pub struct SubprocessRunner {
 }
 
 pub struct DryRunRunner {
+    #[allow(dead_code)]
     pub options: AgentRunOptions,
 }
 
@@ -221,43 +223,59 @@ impl SubprocessRunner {
 }
 
 impl DryRunRunner {
+    /// Display a dry-run preview for one agent step.
+    ///
+    /// Shows the agent name, role, command, prompt path, and a compact
+    /// summary of the prompt.  The returned `AgentOutput.stdout` is a
+    /// neutral marker that does NOT contain review-decision tokens, so
+    /// callers can detect "dry-run preview" without confusing the review
+    /// decision parser.
     pub fn display_and_capture(
         &self,
         prepared: &PreparedAgentCommand,
+        agent: &str,
+        role: &str,
         prompt: &str,
+        prompt_path: &std::path::Path,
     ) -> AgentOutput {
         use crate::display;
 
+        let cmd_preview = format!("{} {}", prepared.cmd, prepared.args.join(" "));
+        let prompt_char_count = prompt.chars().count();
+        let prompt_path_str = prompt_path.display().to_string();
+
         display::agent_line(&format!(
-            "\x1b[2m\x1b[90m[dry-run]\x1b[0m  {} {}",
-            prepared.cmd,
-            prepared.args.join(" "),
+            "\x1b[2m\x1b[90m[dry-run]\x1b[0m  {} / {}",
+            display::agent_display(agent),
+            role,
+        ));
+        display::agent_line(&format!("  \x1b[90mcommand :\x1b[0m {}", cmd_preview));
+        display::agent_line(&format!(
+            "  \x1b[90mprompt  :\x1b[0m [{prompt_char_count} chars] {prompt_path_str}",
         ));
         display::agent_blank();
 
         let lines: Vec<&str> = prompt.lines().collect();
-        let preview_count = lines.len().min(12);
-        for line in &lines[..preview_count] {
-            display::agent_line(line);
-        }
-        if lines.len() > preview_count {
-            display::agent_blank();
+        if lines.len() <= 8 {
+            for line in &lines {
+                display::agent_line(line);
+            }
+        } else {
+            for line in lines.iter().take(3) {
+                display::agent_line(line);
+            }
             display::agent_line(&format!(
-                "\x1b[90m... {} chars total. Full prompt in session prompts/\x1b[0m",
-                prompt.len()
+                "  \x1b[90m[{prompt_char_count} chars, {} lines — full prompt written to session]\x1b[0m",
+                lines.len()
             ));
         }
 
+        // Return a neutral marker.  Must NOT contain APPROVED / CHANGES_REQUESTED /
+        // NEEDS_USER_DECISION so that callers do not accidentally parse a review decision
+        // from dry-run output.
         AgentOutput {
             status: 0,
-            stdout: format!(
-                "[dry-run] Would invoke: {} {}\nPermission mode: {:?}\nPrompt ({} chars):\n---\n{}\n---\n",
-                prepared.cmd,
-                prepared.args.join(" "),
-                self.options.permission_mode,
-                prompt.len(),
-                prompt,
-            ),
+            stdout: "[dry-run preview]".to_string(),
             stderr: String::new(),
         }
     }
