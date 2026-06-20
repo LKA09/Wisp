@@ -2,6 +2,7 @@
 //! Returns None from `try_read_key` when no input is available, so callers can
 //! poll resize events and sleep between reads without blocking indefinitely.
 
+#[allow(dead_code)]
 pub enum Key {
     Char(char),
     Enter,
