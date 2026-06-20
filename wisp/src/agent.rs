@@ -22,7 +22,6 @@ pub enum AgentInputMode {
 
 #[derive(Debug, Clone)]
 pub struct AgentRunOptions {
-    #[allow(dead_code)]
     pub permission_mode: PermissionMode,
     pub input_mode: AgentInputMode,
     pub capture_output: bool,
@@ -47,7 +46,6 @@ pub struct SubprocessRunner {
 }
 
 pub struct DryRunRunner {
-    #[allow(dead_code)]
     pub options: AgentRunOptions,
 }
 
@@ -244,8 +242,20 @@ impl DryRunRunner {
         let prompt_char_count = prompt.chars().count();
         let prompt_path_str = prompt_path.display().to_string();
 
+        let permission_label = match self.options.permission_mode {
+            PermissionMode::Interactive => "interactive",
+            PermissionMode::Auto => "auto",
+            PermissionMode::Skip => "skip",
+        };
+        let input_label = match self.options.input_mode {
+            AgentInputMode::PromptViaArgs => "arg",
+            AgentInputMode::PromptViaStdinClosed => "stdin",
+            AgentInputMode::PromptViaTempFile => "file",
+            AgentInputMode::InteractiveStdin => "interactive-stdin",
+        };
+
         display::agent_line(&format!(
-            "\x1b[2m\x1b[90m[dry-run]\x1b[0m  {} / {}",
+            "\x1b[2m\x1b[90m[dry-run]\x1b[0m  {} / {}  \x1b[90m(permission={permission_label}, input={input_label})\x1b[0m",
             display::agent_display(agent),
             role,
         ));

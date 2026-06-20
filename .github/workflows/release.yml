@@ -7,9 +7,14 @@ on:
         description: 'Release tag (e.g. v0.1.0)'
         required: true
         type: string
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
+
+# ─── Build jobs ────────────────────────────────────────────────────────────────
 
 jobs:
   build-linux-x86_64:
@@ -21,8 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cache Cargo
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -31,7 +35,7 @@ jobs:
           key: linux-x86_64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
       - name: Build
         run: cargo build --release
-      - name: Rename artifact
+      - name: Stage artifact
         run: cp target/release/wisp wisp-linux-x86_64
       - uses: actions/upload-artifact@v4
         with:
@@ -53,8 +57,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Cache Cargo
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -65,7 +68,7 @@ jobs:
         run: |
           export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           cargo build --release --target aarch64-unknown-linux-gnu
-      - name: Rename artifact
+      - name: Stage artifact
         run: cp target/aarch64-unknown-linux-gnu/release/wisp wisp-linux-aarch64
       - uses: actions/upload-artifact@v4
         with:
@@ -81,8 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Cache Cargo
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -91,27 +93,50 @@ jobs:
           key: windows-x86_64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
       - name: Build
         run: cargo build --release
-      - name: Rename artifact
-        run: Copy-Item target\release\wisp.exe wisp-windows-x86_64.exe
+      - name: Stage artifact
         shell: pwsh
+        run: Copy-Item target\release\wisp.exe wisp-windows-x86_64.exe
       - uses: actions/upload-artifact@v4
         with:
           name: wisp-windows-x86_64
           path: wisp/wisp-windows-x86_64.exe
 
-  build-macos-x86_64:
-    name: macOS x86_64
-    runs-on: macos-latest
+  build-windows-aarch64:
+    name: Windows ARM64
+    runs-on: windows-11-arm
     defaults:
       run:
         working-directory: wisp
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
         with:
-          targets: x86_64-apple-darwin
-      - name: Cache Cargo
-        uses: actions/cache@v4
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wisp/target
+          key: windows-aarch64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
+      - name: Build
+        run: cargo build --release
+      - name: Stage artifact
+        shell: pwsh
+        run: Copy-Item target\release\wisp.exe wisp-windows-aarch64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wisp-windows-aarch64
+          path: wisp/wisp-windows-aarch64.exe
+
+  build-macos-x86_64:
+    name: macOS x86_64
+    runs-on: macos-13       # Intel runner — ensures native x86_64 build
+    defaults:
+      run:
+        working-directory: wisp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -119,27 +144,24 @@ jobs:
             wisp/target
           key: macos-x86_64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
       - name: Build
-        run: cargo build --release --target x86_64-apple-darwin
-      - name: Rename artifact
-        run: cp target/x86_64-apple-darwin/release/wisp wisp-darwin-x86_64
+        run: cargo build --release
+      - name: Stage artifact
+        run: cp target/release/wisp wisp-darwin-x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: wisp-darwin-x86_64
           path: wisp/wisp-darwin-x86_64
 
   build-macos-aarch64:
-    name: macOS aarch64 (Apple Silicon)
-    runs-on: macos-latest
+    name: macOS Apple Silicon
+    runs-on: macos-latest   # Apple Silicon runner (arm64) as of macOS 14+
     defaults:
       run:
         working-directory: wisp
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-      - name: Cache Cargo
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -147,25 +169,36 @@ jobs:
             wisp/target
           key: macos-aarch64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin
-      - name: Rename artifact
-        run: cp target/aarch64-apple-darwin/release/wisp wisp-darwin-aarch64
+        run: cargo build --release
+      - name: Stage artifact
+        run: cp target/release/wisp wisp-darwin-aarch64
       - uses: actions/upload-artifact@v4
         with:
           name: wisp-darwin-aarch64
           path: wisp/wisp-darwin-aarch64
 
+# ─── Publish job ───────────────────────────────────────────────────────────────
+
   publish-release:
-    name: Create GitHub Release
+    name: Publish GitHub Release
     needs:
       - build-linux-x86_64
       - build-linux-aarch64
       - build-windows-x86_64
+      - build-windows-aarch64
       - build-macos-x86_64
       - build-macos-aarch64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Resolve the tag from whichever trigger fired.
+      - name: Resolve release tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -179,16 +212,29 @@ jobs:
           chmod +x release-assets/wisp-darwin-x86_64/wisp-darwin-x86_64
           chmod +x release-assets/wisp-darwin-aarch64/wisp-darwin-aarch64
 
-      - name: Create release and upload assets
+      # Create the release if it does not exist yet; otherwise upload/replace assets.
+      - name: Create or update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          gh release create "$TAG" \
-            --title "Wisp $TAG" \
-            --generate-notes \
-            release-assets/wisp-linux-x86_64/wisp-linux-x86_64 \
-            release-assets/wisp-linux-aarch64/wisp-linux-aarch64 \
-            release-assets/wisp-windows-x86_64/wisp-windows-x86_64.exe \
-            release-assets/wisp-darwin-x86_64/wisp-darwin-x86_64 \
+          TAG="${{ steps.tag.outputs.tag }}"
+
+          ASSETS=(
+            release-assets/wisp-linux-x86_64/wisp-linux-x86_64
+            release-assets/wisp-linux-aarch64/wisp-linux-aarch64
+            release-assets/wisp-windows-x86_64/wisp-windows-x86_64.exe
+            release-assets/wisp-windows-aarch64/wisp-windows-aarch64.exe
+            release-assets/wisp-darwin-x86_64/wisp-darwin-x86_64
             release-assets/wisp-darwin-aarch64/wisp-darwin-aarch64
+          )
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists — uploading/replacing assets."
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          else
+            echo "Creating release $TAG."
+            gh release create "$TAG" \
+              --title "Wisp $TAG" \
+              --generate-notes \
+              "${ASSETS[@]}"
+          fi
