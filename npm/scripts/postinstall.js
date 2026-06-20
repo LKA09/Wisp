@@ -57,9 +57,26 @@ fs.mkdirSync(distDir, { recursive: true });
 get(downloadUrl, (err, data) => {
   if (err) {
     warn(`Download failed: ${err.message}`);
-    warn('Build from source instead:');
+    warn('');
+    warn(`Expected release asset: ${assetName}`);
+    warn(`Release URL checked: ${downloadUrl}`);
+    warn('');
+    warn('The GitHub Release asset may be missing for this version/platform.');
+    warn('');
+    warn('Build from source (Windows PowerShell):');
+    warn('  cd wisp');
+    warn('  cargo build --release');
+    warn('  New-Item -ItemType Directory -Force -Path ..\\npm\\dist | Out-Null');
+    warn('  Copy-Item target\\release\\wisp.exe ..\\npm\\dist\\wisp.exe');
+    warn('');
+    warn('Build from source (Linux / macOS):');
     warn('  cd wisp && cargo build --release');
-    warn('  node npm/scripts/build.js');
+    warn('  mkdir -p ../npm/dist && cp target/release/wisp ../npm/dist/wisp');
+    warn('');
+    warn('Expected release asset names:');
+    warn('  wisp-windows-x86_64.exe   wisp-windows-aarch64.exe');
+    warn('  wisp-linux-x86_64         wisp-linux-aarch64');
+    warn('  wisp-darwin-x86_64        wisp-darwin-aarch64');
     process.exit(0);
   }
 
