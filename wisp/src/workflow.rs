@@ -104,7 +104,10 @@ pub fn summon(args: SummonArgs) -> Result<()> {
 
     // ── Steps 2+: patch → review loop ─────────────────────────────────────────
     let mut approved = false;
+    let mut rounds_ran = 0usize;
     for round in 0..max_rounds {
+        rounds_ran = round + 1;
+
         let suffix = if max_rounds > 1 {
             format!("-r{}", round + 1)
         } else {
@@ -178,7 +181,15 @@ pub fn summon(args: SummonArgs) -> Result<()> {
             &review_prompt,
         )?;
 
-        let decision = parse_review_decision(&review_output.stdout);
+        // In dry-run mode, simulate APPROVED so the workflow completes successfully.
+        // Never parse decisions from DryRunRunner stdout (it may contain prompt text
+        // that includes the literal decision tokens as examples).
+        let decision = if args.execute_agents {
+            parse_review_decision(&review_output.stdout)
+        } else {
+            ReviewDecision::Approved
+        };
+
         match decision {
             ReviewDecision::Approved => {
                 approved = true;
@@ -256,6 +267,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         &mode,
         &instructions,
         &config,
+        rounds_ran,
     )?;
     display::finish(&session.path().display().to_string(), !args.execute_agents);
     Ok(())
@@ -340,7 +352,7 @@ pub fn run_single_agent(args: SingleAgentArgs) -> Result<()> {
                 stream_output: true,
             },
         }
-        .display_and_capture(&prepared, &prompt)
+        .display_and_capture(&prepared, &args.agent, "direct", &prompt, &prompt_path)
     };
     let duration_ms = started.elapsed().as_millis();
     let after_step = git::snapshot().context("Failed to capture post-step git snapshot")?;
@@ -370,6 +382,7 @@ pub fn run_single_agent(args: SingleAgentArgs) -> Result<()> {
             &violations,
         ),
     )?;
+    write_step_diffs(&session, "direct", &before_step, &after_step)?;
 
     match handle_policy_violations(&violations, &config, &args.lang, &args.agent, "direct")? {
         true => display::agent_end(&args.agent, output.status == 0),
@@ -455,7 +468,7 @@ fn run_workflow_step(
                 stream_output: true,
             },
         }
-        .display_and_capture(&prepared, prompt)
+        .display_and_capture(&prepared, agent, role, prompt, &prompt_path)
     };
     let duration_ms = started.elapsed().as_millis();
     let after_step = git::snapshot().context("Failed to capture post-step git snapshot")?;
@@ -482,6 +495,7 @@ fn run_workflow_step(
             &violations,
         ),
     )?;
+    write_step_diffs(session, role, &before_step, &after_step)?;
 
     match handle_policy_violations(&violations, config, &args.lang, agent, role)? {
         true => display::agent_end(agent, output.status == 0),
@@ -643,9 +657,53 @@ fn write_snapshot(session: &Session, prefix: &str, snapshot: &GitSnapshot) -> Re
         &format!("{prefix}/diff.name-status.txt"),
         &snapshot.diff_name_status,
     )?;
-    session.write(&format!("{prefix}/diff.txt"), &snapshot.diff_full)?;
-    session.write(&format!("{prefix}/diff.cached.txt"), &snapshot.diff_cached)?;
+    session.write(&format!("{prefix}/diff.patch"), &snapshot.diff_full)?;
+    session.write(
+        &format!("{prefix}/diff.cached.patch"),
+        &snapshot.diff_cached,
+    )?;
     Ok(())
+}
+
+/// Write per-step diff files using a sanitised step name derived from `role`.
+fn write_step_diffs(
+    session: &Session,
+    role: &str,
+    before: &GitSnapshot,
+    after: &GitSnapshot,
+) -> Result<()> {
+    let safe = make_safe_step_name(role);
+    session.write(
+        &format!("outputs/{safe}.diff.before.patch"),
+        &before.diff_full,
+    )?;
+    session.write(
+        &format!("outputs/{safe}.diff.after.patch"),
+        &after.diff_full,
+    )?;
+    session.write(
+        &format!("outputs/{safe}.diff.cached.before.patch"),
+        &before.diff_cached,
+    )?;
+    session.write(
+        &format!("outputs/{safe}.diff.cached.after.patch"),
+        &after.diff_cached,
+    )?;
+    Ok(())
+}
+
+/// Convert a workflow role name to a filesystem-safe kebab-case name.
+/// e.g. "patch [r1]" → "patch-r1", "review [r2]" → "review-r2"
+fn make_safe_step_name(role: &str) -> String {
+    let raw: String = role
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    raw.split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+        .to_lowercase()
 }
 
 fn handle_policy_violations(
@@ -701,6 +759,7 @@ fn format_agent_output(agent: &str, role: &str, output: &AgentOutput) -> String 
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn format_step_meta(
     role: &str,
     agent: &str,
@@ -733,7 +792,7 @@ fn format_step_meta(
     } else {
         violations
             .iter()
-            .map(|violation| violation.message.clone())
+            .map(|v| v.message.as_str())
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -758,7 +817,7 @@ fn format_policy_violation_error(
 ) -> String {
     let details = violations
         .iter()
-        .map(|violation| violation.message.clone())
+        .map(|v| v.message.as_str())
         .collect::<Vec<_>>()
         .join("; ");
 
@@ -940,6 +999,7 @@ Rules:
 
 // ── Session finalization ───────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn finalize_workflow_summary(
     session: &Session,
     task: &str,
@@ -948,34 +1008,64 @@ fn finalize_workflow_summary(
     mode: &str,
     instructions: &LoadedInstructions,
     config: &Config,
+    rounds_ran: usize,
 ) -> Result<()> {
     let final_snapshot = git::snapshot().context("Failed to capture final git snapshot")?;
     write_snapshot(session, "git/after", &final_snapshot)?;
+
+    // Build the dynamic workflow step list based on what actually ran.
+    let mut step_num = 1usize;
+    let mut steps = vec![format!(
+        "{}. {} — implement",
+        step_num, config.workflow.implementer
+    )];
+    for r in 1..=rounds_ran {
+        let r_label = if rounds_ran > 1 {
+            format!(" r{r}")
+        } else {
+            String::new()
+        };
+        step_num += 1;
+        steps.push(format!(
+            "{}. {} — patch{}",
+            step_num, config.workflow.patcher, r_label
+        ));
+        step_num += 1;
+        steps.push(format!(
+            "{}. {} — review{}",
+            step_num, config.workflow.reviewer, r_label
+        ));
+    }
+    step_num += 1;
+    steps.push(format!("{}. {} — ship", step_num, config.workflow.shipper));
+    let workflow_steps = steps.join("\n");
+
+    let is_dry_run = mode == "dry-run";
+    let mode_note = if is_dry_run {
+        "dry-run command-preview (no agents were executed)"
+    } else {
+        "actual execution"
+    };
+
     session.write(
         "summary.md",
         &format!(
             "# Wisp Session Summary\n\n\
             ## Task\n\n\
-            Original: {}\n\n\
-            Normalized: {}\n\n\
+            Original: {task}\n\n\
+            Normalized: {normalized_task_en}\n\n\
             ## Context\n\n\
-            - Branch: {}\n\
-            - Mode: {}\n\
+            - Branch: {branch}\n\
+            - Mode: {mode} ({mode_note})\n\
             - Session: {}\n\
-            - Instructions loaded: {} ({} bytes{})\n\n\
+            - Instructions loaded: {} ({} bytes{})\n\
+            - Patch/review rounds: {rounds_ran}\n\n\
             ## Workflow\n\n\
-            1. {} implement\n\
-            2. {} patch\n\
-            3. {} review\n\
-            4. {} ship\n\n\
+            {workflow_steps}\n\n\
             ## Security Note\n\n\
             Wisp is not a security sandbox. Agents run with your full user permissions. \
             The policy layer blocks specific commands and paths configured in wisp.toml, \
             but cannot prevent all unsafe actions. Review agent output before approving commits.\n",
-            task,
-            normalized_task_en,
-            branch,
-            mode,
             session.path().display(),
             instructions.files.len(),
             instructions.total_bytes,
@@ -984,10 +1074,6 @@ fn finalize_workflow_summary(
             } else {
                 ""
             },
-            config.workflow.implementer,
-            config.workflow.patcher,
-            config.workflow.reviewer,
-            config.workflow.shipper,
         ),
     )
 }
@@ -1008,21 +1094,16 @@ fn finalize_single_agent_summary(
         &format!(
             "# Wisp Single Agent Summary\n\n\
             ## Task\n\n\
-            Original: {}\n\n\
-            Normalized: {}\n\n\
+            Original: {task}\n\n\
+            Normalized: {normalized_task_en}\n\n\
             ## Context\n\n\
-            - Agent: {}\n\
-            - Branch: {}\n\
-            - Mode: {}\n\
+            - Agent: {agent}\n\
+            - Branch: {branch}\n\
+            - Mode: {mode}\n\
             - Session: {}\n\
             - Instructions loaded: {} ({} bytes{})\n\n\
             ## Security Note\n\n\
             Wisp is not a security sandbox. Agents run with your full user permissions.\n",
-            task,
-            normalized_task_en,
-            agent,
-            branch,
-            mode,
             session.path().display(),
             instructions.files.len(),
             instructions.total_bytes,
@@ -1049,7 +1130,7 @@ fn mode_label(execute_agents: bool, permission_mode: PermissionMode) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReviewDecision, parse_review_decision};
+    use super::{ReviewDecision, make_safe_step_name, parse_review_decision};
 
     #[test]
     fn parses_approved() {
@@ -1091,5 +1172,25 @@ mod tests {
             parse_review_decision("I looked at the code and it seems fine."),
             ReviewDecision::ChangesRequested
         );
+    }
+
+    /// The DryRunRunner returns "[dry-run preview]" which must NOT be parsed
+    /// as APPROVED, ensuring the dry-run workflow completion path is never
+    /// accidentally triggered by real review parsing.
+    #[test]
+    fn dry_run_preview_stdout_is_not_approved() {
+        assert_eq!(
+            parse_review_decision("[dry-run preview]"),
+            ReviewDecision::ChangesRequested
+        );
+    }
+
+    #[test]
+    fn safe_step_name_strips_brackets_and_spaces() {
+        assert_eq!(make_safe_step_name("patch [r1]"), "patch-r1");
+        assert_eq!(make_safe_step_name("review [r2]"), "review-r2");
+        assert_eq!(make_safe_step_name("implement"), "implement");
+        assert_eq!(make_safe_step_name("ship"), "ship");
+        assert_eq!(make_safe_step_name("direct"), "direct");
     }
 }

@@ -105,6 +105,7 @@ const COMPLETIONS: &[(&str, &str)] = &[
     ("/auto", "execute workflow (auto-approve)"),
     ("/claude", "run Claude directly"),
     ("/codex", "run Codex directly"),
+    ("/paste", "enter multi-line paste mode"),
     ("/help", "show commands"),
     ("/exit", "exit wisp"),
     ("/quit", "exit wisp"),
@@ -241,6 +242,7 @@ pub fn interactive_help() {
         ("/auto <task>", "execute workflow (auto-approve)"),
         ("/claude <task>", "run Claude directly"),
         ("/codex <task>", "run Codex directly"),
+        ("/paste", "enter explicit multi-line paste mode"),
         ("/help", "show this help"),
         ("exit / quit", "exit wisp"),
     ];
@@ -248,6 +250,21 @@ pub fn interactive_help() {
     for (cmd, desc) in cmds {
         println!("  {WHITE}{cmd:<26}{RESET}  {GRAY}{desc}{RESET}");
     }
+
+    println!();
+    println!("  {GRAY}Multi-line paste (fallback / lines mode):{RESET}");
+    println!("  {GRAY}  Paste text, then end the last line with a trailing command:{RESET}");
+    println!("  {WHITE}    <multi-line task>{RESET}");
+    println!(
+        "  {WHITE}    /run{RESET}       {GRAY}or{RESET}  {WHITE}/auto{RESET}  {GRAY}or{RESET}  {WHITE}/claude{RESET}  {GRAY}or{RESET}  {WHITE}/codex{RESET}"
+    );
+    println!("  {GRAY}  No trailing command → dry-run preview.{RESET}");
+    println!();
+    println!("  {GRAY}Explicit paste mode (works in raw console):{RESET}");
+    println!("  {WHITE}    /paste{RESET}");
+    println!("  {WHITE}    <paste content>{RESET}");
+    println!("  {WHITE}    /end{RESET}");
+    println!("  {WHITE}    /run{RESET}  {GRAY}(or Enter for dry-run){RESET}");
     println!();
 }
 
@@ -260,6 +277,7 @@ pub fn interactive_command_preview(query: &str) {
         ),
         ("claude", "/claude <task>   —  run Claude directly"),
         ("codex", "/codex <task>    —  run Codex directly"),
+        ("paste", "/paste           —  multi-line paste mode"),
         ("help", "/help            —  show all commands"),
         ("exit", "/exit            —  exit wisp"),
         ("quit", "/quit            —  exit wisp"),
@@ -446,6 +464,27 @@ pub fn doctor_summary(env_ok: bool, agents_ok: bool) {
         println!("  {GRAY}Run {WHITE}wisp init{GRAY} and install missing tools.{RESET}");
     }
     println!();
+}
+
+// ─── Paste mode ───────────────────────────────────────────────────────────────
+
+pub fn paste_mode_enter() {
+    println!();
+    println!(
+        "  {GRAY}[paste mode — type or paste content, finish with {WHITE}/end{GRAY} on its own line]{RESET}"
+    );
+    println!();
+}
+
+pub fn paste_mode_captured(char_count: usize, line_count: usize) {
+    println!();
+    println!("  {GRAY}[pasted: {char_count} chars, {line_count} lines]{RESET}");
+}
+
+pub fn paste_mode_command_prompt() {
+    print!(
+        "  {ACCENT}command{RESET}  {GRAY}(/run  /auto  /claude  /codex  or Enter for dry-run){RESET}\n  {ACCENT}›{RESET} "
+    );
 }
 
 // ─── Thinking spinner ─────────────────────────────────────────────────────────

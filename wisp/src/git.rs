@@ -69,6 +69,7 @@ pub fn diff() -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+#[allow(dead_code)]
 pub fn status() -> Result<String> {
     let output = Command::new("git").args(["status"]).output()?;
     Ok(String::from_utf8_lossy(&output.stdout).to_string())

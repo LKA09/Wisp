@@ -25,6 +25,7 @@ pub enum InteractiveAction {
     PreviewCommands {
         query: String,
     },
+    EnterPasteMode,
     Help,
     Exit,
 }
@@ -45,7 +46,13 @@ pub fn parse_interactive_action(input: &str) -> InteractiveAction {
         }
         "exit" | "quit" | "q" | "/exit" | "/quit" => return InteractiveAction::Exit,
         "/help" | "/commands" | "help" => return InteractiveAction::Help,
+        "/paste" => return InteractiveAction::EnterPasteMode,
         _ => {}
+    }
+
+    // Multi-line input: detect trailing command on the last non-empty line.
+    if trimmed.contains('\n') {
+        return parse_multiline_action(trimmed);
     }
 
     if let Some(task) = trimmed.strip_prefix("/claude ") {
@@ -110,6 +117,51 @@ pub fn parse_interactive_action(input: &str) -> InteractiveAction {
         };
     }
 
+    InteractiveAction::DryRunWorkflow {
+        task: trimmed.into(),
+    }
+}
+
+/// Parse multi-line input, recognising a trailing command on the last non-empty line.
+///
+/// Supported trailing commands: `/run`, `/exec`, `/auto`, `/claude`, `/codex`.
+/// If the last non-empty line is not a recognized command, the whole text is
+/// treated as a dry-run workflow.
+fn parse_multiline_action(trimmed: &str) -> InteractiveAction {
+    let lines: Vec<&str> = trimmed.lines().collect();
+
+    if let Some(pos) = lines.iter().rposition(|l| !l.trim().is_empty()) {
+        let last = lines[pos].trim();
+        // Build the task from all lines before the trailing command.
+        let task_str = lines[..pos].join("\n");
+        let task = task_str.trim_end();
+
+        match last {
+            "/run" | "/exec" => {
+                return parse_execute_command(task, PermissionMode::Interactive);
+            }
+            "/auto" => {
+                return parse_execute_command(task, PermissionMode::Auto);
+            }
+            "/claude" => {
+                return InteractiveAction::ExecuteSingleAgent {
+                    agent: "claude".into(),
+                    task: task.trim().to_string(),
+                    permission_mode: PermissionMode::Interactive,
+                };
+            }
+            "/codex" => {
+                return InteractiveAction::ExecuteSingleAgent {
+                    agent: "codex".into(),
+                    task: task.trim().to_string(),
+                    permission_mode: PermissionMode::Interactive,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    // No recognized trailing command — dry-run with full text.
     InteractiveAction::DryRunWorkflow {
         task: trimmed.into(),
     }
@@ -186,6 +238,11 @@ fn dispatch(trimmed: &str) -> bool {
             display::interactive_command_preview(&query);
         }
         InteractiveAction::Help => display::interactive_help(),
+        InteractiveAction::EnterPasteMode => {
+            // Normally handled in the interactive loops before dispatch.
+            // If we get here, just show the paste mode hint.
+            display::paste_mode_enter();
+        }
         InteractiveAction::DryRunWorkflow { task } => {
             run_summon_command(&task, false, false, PermissionMode::Interactive);
         }
@@ -209,18 +266,72 @@ fn dispatch(trimmed: &str) -> bool {
 /// Raw-mode interactive loop: reads one character at a time and shows live
 /// command completions when the user types a `/` prefix.
 fn interactive_raw(raw: crate::input::RawConsole, resize_rx: std::sync::mpsc::Receiver<()>) {
-    loop {
-        let Some(line) = read_raw_line(&raw, &resize_rx) else {
-            break;
-        };
+    while let Some(line) = read_raw_line(&raw, &resize_rx) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
+
+        // Handle /paste before dispatch so we can collect lines until /end.
+        if trimmed == "/paste" {
+            let (task, cmd) = run_paste_mode_raw(&raw, &resize_rx);
+            if task.is_empty() && cmd.is_none() {
+                continue;
+            }
+            let combined = match cmd.as_deref() {
+                Some(c) => format!("{}\n{}", task.trim(), c),
+                None => task,
+            };
+            let combined_trimmed = combined.trim().to_string();
+            if !combined_trimmed.is_empty() && !dispatch(&combined_trimmed) {
+                break;
+            }
+            continue;
+        }
+
         if !dispatch(trimmed) {
             break;
         }
     }
+}
+
+/// Collect paste block lines in raw mode until the user types `/end`.
+/// Returns (task_text, optional_trailing_command).
+fn run_paste_mode_raw(
+    raw: &crate::input::RawConsole,
+    resize_rx: &std::sync::mpsc::Receiver<()>,
+) -> (String, Option<String>) {
+    use crate::display;
+    use std::io::Write;
+
+    display::paste_mode_enter();
+
+    let mut lines: Vec<String> = Vec::new();
+    while let Some(line) = read_raw_line(raw, resize_rx) {
+        if line.trim() == "/end" {
+            break;
+        }
+        lines.push(line);
+    }
+
+    let char_count: usize = lines
+        .iter()
+        .map(|l| l.len() + 1)
+        .sum::<usize>()
+        .saturating_sub(1);
+    display::paste_mode_captured(char_count, lines.len());
+
+    // Prompt the user for an optional command.
+    display::paste_mode_command_prompt();
+    std::io::stdout().flush().ok();
+    let cmd_line = read_raw_line(raw, resize_rx).unwrap_or_default();
+    let cmd = if cmd_line.trim().is_empty() {
+        None
+    } else {
+        Some(cmd_line.trim().to_string())
+    };
+
+    (lines.join("\n"), cmd)
 }
 
 /// Read one logical line in raw mode, showing live completions as the user types.
@@ -245,7 +356,7 @@ fn read_raw_line(
         match raw.try_read_key() {
             Some(input::Key::Enter) => {
                 // Clear any completion box below and advance to the next line.
-                print!("\x1b[J\n");
+                println!("\x1b[J");
                 std::io::stdout().flush().ok();
                 return Some(buf);
             }
@@ -309,6 +420,25 @@ fn interactive_lines(resize_rx: std::sync::mpsc::Receiver<()>) {
 
         let Some(first_line) = first else { break };
 
+        // Handle /paste before the regular command dispatch.
+        if first_line.trim() == "/paste" {
+            let (task, cmd) = run_paste_mode_lines(&rx);
+            if task.is_empty() && cmd.is_none() {
+                continue;
+            }
+            let combined = match cmd.as_deref() {
+                Some(c) => format!("{}\n{}", task.trim(), c),
+                None => task,
+            };
+            let combined_trimmed = combined.trim().to_string();
+            if !combined_trimmed.is_empty() && !dispatch(&combined_trimmed) {
+                break;
+            }
+            continue;
+        }
+
+        // For non-paste input: if first line is a slash command, use it as-is.
+        // Otherwise collect additional lines that arrive within 40 ms (paste window).
         let input = if first_line.trim_start().starts_with('/') {
             first_line
         } else {
@@ -327,6 +457,45 @@ fn interactive_lines(resize_rx: std::sync::mpsc::Receiver<()>) {
             break;
         }
     }
+}
+
+/// Collect paste block lines in lines mode until the user types `/end`.
+/// Returns (task_text, optional_trailing_command).
+fn run_paste_mode_lines(rx: &std::sync::mpsc::Receiver<String>) -> (String, Option<String>) {
+    use crate::display;
+    use std::io::Write;
+    use std::time::Duration;
+
+    display::paste_mode_enter();
+
+    let mut lines: Vec<String> = Vec::new();
+    while let Ok(line) = rx.recv_timeout(Duration::from_secs(120)) {
+        if line.trim() == "/end" {
+            break;
+        }
+        lines.push(line);
+    }
+
+    let char_count: usize = lines
+        .iter()
+        .map(|l| l.len() + 1)
+        .sum::<usize>()
+        .saturating_sub(1);
+    display::paste_mode_captured(char_count, lines.len());
+
+    // Prompt the user for an optional command.
+    display::paste_mode_command_prompt();
+    std::io::stdout().flush().ok();
+    let cmd_line = rx
+        .recv_timeout(Duration::from_secs(120))
+        .unwrap_or_default();
+    let cmd = if cmd_line.trim().is_empty() {
+        None
+    } else {
+        Some(cmd_line.trim().to_string())
+    };
+
+    (lines.join("\n"), cmd)
 }
 
 pub fn init(force: bool) {
@@ -591,6 +760,148 @@ mod tests {
         assert_eq!(
             parse_interactive_action("/co"),
             InteractiveAction::PreviewCommands { query: "co".into() }
+        );
+    }
+
+    // ── Multi-line paste with trailing commands ────────────────────────────────
+
+    #[test]
+    fn multiline_with_trailing_run_executes_workflow() {
+        let input = "fix the auth bug\naddress the review comments\n/run";
+        assert_eq!(
+            parse_interactive_action(input),
+            InteractiveAction::ExecuteWorkflow {
+                task: "fix the auth bug\naddress the review comments".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+    }
+
+    #[test]
+    fn multiline_with_trailing_auto_executes_auto_workflow() {
+        let input = "fix the auth bug\n/auto";
+        assert_eq!(
+            parse_interactive_action(input),
+            InteractiveAction::ExecuteWorkflow {
+                task: "fix the auth bug".into(),
+                permission_mode: PermissionMode::Auto,
+            }
+        );
+    }
+
+    #[test]
+    fn multiline_with_trailing_claude_runs_single_agent() {
+        let input = "fix the auth bug\nfocus on tests\n/claude";
+        assert_eq!(
+            parse_interactive_action(input),
+            InteractiveAction::ExecuteSingleAgent {
+                agent: "claude".into(),
+                task: "fix the auth bug\nfocus on tests".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+    }
+
+    #[test]
+    fn multiline_with_trailing_codex_runs_single_agent() {
+        let input = "refactor auth module\n/codex";
+        assert_eq!(
+            parse_interactive_action(input),
+            InteractiveAction::ExecuteSingleAgent {
+                agent: "codex".into(),
+                task: "refactor auth module".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+    }
+
+    #[test]
+    fn multiline_no_trailing_command_is_dry_run() {
+        let input = "fix the auth bug\nfocus on tests\nlook at src/auth.rs";
+        assert_eq!(
+            parse_interactive_action(input),
+            InteractiveAction::DryRunWorkflow {
+                task: "fix the auth bug\nfocus on tests\nlook at src/auth.rs".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn trailing_command_not_included_in_task() {
+        let input = "task line 1\ntask line 2\n/run";
+        match parse_interactive_action(input) {
+            InteractiveAction::ExecuteWorkflow { task, .. } => {
+                assert_eq!(task, "task line 1\ntask line 2");
+                assert!(!task.contains("/run"));
+            }
+            other => panic!("expected ExecuteWorkflow, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn trailing_command_not_included_in_single_agent_task() {
+        let input = "refactor auth\ncheck edge cases\n/claude";
+        match parse_interactive_action(input) {
+            InteractiveAction::ExecuteSingleAgent { task, .. } => {
+                assert_eq!(task, "refactor auth\ncheck edge cases");
+                assert!(!task.contains("/claude"));
+            }
+            other => panic!("expected ExecuteSingleAgent, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn single_line_slash_commands_still_work() {
+        assert_eq!(
+            parse_interactive_action("/run fix the login bug"),
+            InteractiveAction::ExecuteWorkflow {
+                task: "fix the login bug".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+        assert_eq!(
+            parse_interactive_action("/auto deploy to staging"),
+            InteractiveAction::ExecuteWorkflow {
+                task: "deploy to staging".into(),
+                permission_mode: PermissionMode::Auto,
+            }
+        );
+        assert_eq!(
+            parse_interactive_action("/claude explain this code"),
+            InteractiveAction::ExecuteSingleAgent {
+                agent: "claude".into(),
+                task: "explain this code".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+        assert_eq!(
+            parse_interactive_action("/codex refactor utils"),
+            InteractiveAction::ExecuteSingleAgent {
+                agent: "codex".into(),
+                task: "refactor utils".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_paste_command() {
+        assert_eq!(
+            parse_interactive_action("/paste"),
+            InteractiveAction::EnterPasteMode,
+        );
+    }
+
+    #[test]
+    fn multiline_trailing_blank_lines_ignored_in_command_detection() {
+        // Trailing blank lines after /run should still be ignored.
+        let input = "fix bug\n/run\n\n";
+        assert_eq!(
+            parse_interactive_action(input),
+            InteractiveAction::ExecuteWorkflow {
+                task: "fix bug".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
         );
     }
 }
