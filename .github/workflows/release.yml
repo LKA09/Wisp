@@ -1,0 +1,194 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-x86_64:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wisp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wisp/target
+          key: linux-x86_64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
+      - name: Build
+        run: cargo build --release
+      - name: Rename artifact
+        run: cp target/release/wisp wisp-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wisp-linux-x86_64
+          path: wisp/wisp-linux-x86_64
+
+  build-linux-aarch64:
+    name: Linux aarch64
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wisp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - name: Install cross-compilation toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wisp/target
+          key: linux-aarch64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
+      - name: Build
+        run: |
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          cargo build --release --target aarch64-unknown-linux-gnu
+      - name: Rename artifact
+        run: cp target/aarch64-unknown-linux-gnu/release/wisp wisp-linux-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wisp-linux-aarch64
+          path: wisp/wisp-linux-aarch64
+
+  build-windows-x86_64:
+    name: Windows x86_64
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: wisp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wisp/target
+          key: windows-x86_64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
+      - name: Build
+        run: cargo build --release
+      - name: Rename artifact
+        run: Copy-Item target\release\wisp.exe wisp-windows-x86_64.exe
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wisp-windows-x86_64
+          path: wisp/wisp-windows-x86_64.exe
+
+  build-macos-x86_64:
+    name: macOS x86_64
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: wisp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wisp/target
+          key: macos-x86_64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
+      - name: Build
+        run: cargo build --release --target x86_64-apple-darwin
+      - name: Rename artifact
+        run: cp target/x86_64-apple-darwin/release/wisp wisp-darwin-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wisp-darwin-x86_64
+          path: wisp/wisp-darwin-x86_64
+
+  build-macos-aarch64:
+    name: macOS aarch64 (Apple Silicon)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: wisp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wisp/target
+          key: macos-aarch64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
+      - name: Build
+        run: cargo build --release --target aarch64-apple-darwin
+      - name: Rename artifact
+        run: cp target/aarch64-apple-darwin/release/wisp wisp-darwin-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wisp-darwin-aarch64
+          path: wisp/wisp-darwin-aarch64
+
+  publish-release:
+    name: Create GitHub Release
+    needs:
+      - build-linux-x86_64
+      - build-linux-aarch64
+      - build-windows-x86_64
+      - build-macos-x86_64
+      - build-macos-aarch64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Make Linux/macOS binaries executable
+        run: |
+          chmod +x release-assets/wisp-linux-x86_64/wisp-linux-x86_64
+          chmod +x release-assets/wisp-linux-aarch64/wisp-linux-aarch64
+          chmod +x release-assets/wisp-darwin-x86_64/wisp-darwin-x86_64
+          chmod +x release-assets/wisp-darwin-aarch64/wisp-darwin-aarch64
+
+      - name: Create release and upload assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          gh release create "$TAG" \
+            --title "Wisp $TAG" \
+            --generate-notes \
+            release-assets/wisp-linux-x86_64/wisp-linux-x86_64 \
+            release-assets/wisp-linux-aarch64/wisp-linux-aarch64 \
+            release-assets/wisp-windows-x86_64/wisp-windows-x86_64.exe \
+            release-assets/wisp-darwin-x86_64/wisp-darwin-x86_64 \
+            release-assets/wisp-darwin-aarch64/wisp-darwin-aarch64
