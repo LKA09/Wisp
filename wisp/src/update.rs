@@ -69,14 +69,17 @@ fn platform_asset() -> Result<String> {
         bail!("Unsupported architecture for auto-update. Please update manually.");
     };
 
-    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let ext = if cfg!(target_os = "windows") {
+        ".exe"
+    } else {
+        ""
+    };
     Ok(format!("wisp-{os}-{arch}{ext}"))
 }
 
 fn download_asset(asset: &str, version: &str) -> Result<Vec<u8>> {
-    let url = format!(
-        "https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/v{version}/{asset}"
-    );
+    let url =
+        format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/v{version}/{asset}");
     println!("Downloading: {url}");
 
     let response = ureq::get(&url)
