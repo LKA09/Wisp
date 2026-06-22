@@ -130,13 +130,15 @@ jobs:
 
   build-macos-x86_64:
     name: macOS x86_64
-    runs-on: macos-13       # Intel runner — ensures native x86_64 build
+    runs-on: macos-14        # ARM runner — cross-compiles to x86_64 (Intel runners discontinued)
     defaults:
       run:
         working-directory: wisp
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
       - uses: actions/cache@v4
         with:
           path: |
@@ -145,9 +147,9 @@ jobs:
             wisp/target
           key: macos-x86_64-cargo-${{ hashFiles('wisp/Cargo.lock') }}
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --target x86_64-apple-darwin
       - name: Stage artifact
-        run: cp target/release/wisp wisp-darwin-x86_64
+        run: cp target/x86_64-apple-darwin/release/wisp wisp-darwin-x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: wisp-darwin-x86_64
