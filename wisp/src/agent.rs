@@ -141,7 +141,16 @@ fn spawn_cmd(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) 
         command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
     }
 
-    Ok(command.spawn()?)
+    command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            anyhow::anyhow!(
+                "`{cmd}` is not installed or not in PATH\n  \
+                 → Install it, or switch to dry-run mode with: wisp mode dry-run"
+            )
+        } else {
+            anyhow::Error::from(e)
+        }
+    })
 }
 
 impl SubprocessRunner {
