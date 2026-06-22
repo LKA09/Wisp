@@ -5,8 +5,7 @@
 **A local coding agent orchestrator. Claude implements. Codex ships. You stay in control.**
 
 [![CI](https://github.com/LKA09/Wisp/actions/workflows/ci.yml/badge.svg)](https://github.com/LKA09/Wisp/actions/workflows/ci.yml)
-[![CD](https://github.com/LKA09/Wisp/actions/workflows/release.yml/badge.svg)](https://github.com/LKA09/Wisp/actions/workflows/release.yml)
-[![npm](https://img.shields.io/npm/v/@lka09/wisp?color=a78bfa&label=npm)](https://www.npmjs.com/package/@lka09/wisp)
+[![CD](https://github.com/LKA09/Wisp/actions/workflows/release.yml/badge.svg?event=push)](https://github.com/LKA09/Wisp/actions/workflows/release.yml)[![npm](https://img.shields.io/npm/v/@lka09/wisp?color=a78bfa&label=npm)](https://www.npmjs.com/package/@lka09/wisp)
 [![License: MIT](https://img.shields.io/badge/license-MIT-a78bfa.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-a78bfa.svg)](#installation)
 
