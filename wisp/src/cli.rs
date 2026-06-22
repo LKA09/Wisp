@@ -592,11 +592,24 @@ pub fn doctor() {
 }
 
 fn cmd_available(cmd: &str, arg: &str) -> bool {
-    Command::new(cmd)
-        .arg(arg)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    // On Windows, npm global binaries are installed as .cmd scripts.
+    // Command::new only finds .exe, so we invoke through cmd.exe instead.
+    #[cfg(windows)]
+    {
+        Command::new("cmd")
+            .args(["/c", cmd, arg])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(cmd)
+            .arg(arg)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
 }
 
 pub fn summon(task: &str, execute_agents: bool, allow_dirty: bool, permission: PermissionMode) {
