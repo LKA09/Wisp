@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write   # npm provenance 서명에 필요
 
 # ─── Build jobs ────────────────────────────────────────────────────────────────
 
@@ -238,3 +239,36 @@ jobs:
               --generate-notes \
               "${ASSETS[@]}"
           fi
+
+# ─── npm publish job ────────────────────────────────────────────────────────────
+
+  publish-npm:
+    name: Publish to npm
+    needs: publish-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # Strip leading 'v' to get a semver version string (e.g. v0.1.0 → 0.1.0)
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Bump package.json version to match tag
+        run: |
+          cd npm
+          npm version "${{ steps.tag.outputs.version }}" --no-git-tag-version
+
+      - name: Publish
+        run: npm publish --access public --provenance
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
