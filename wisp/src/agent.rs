@@ -123,7 +123,7 @@ fn substitute_placeholders(input: &str, vars: &HashMap<String, String>) -> Strin
     result
 }
 
-fn spawn_cmd(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) -> Result<Child> {
+fn make_command(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) -> Command {
     let mut command = Command::new(cmd);
     command
         .args(args)
@@ -134,14 +134,49 @@ fn spawn_cmd(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) 
             | AgentInputMode::PromptViaArgs
             | AgentInputMode::InteractiveStdin => Stdio::inherit(),
         });
-
     if options.capture_output {
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
     } else {
         command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
     }
+    command
+}
 
-    command.spawn().map_err(|e| {
+/// On Windows, look up `cmd` via `where.exe` to find .cmd/.bat wrappers (e.g. npm CLIs).
+/// Returns the resolved path string if found, or `None` if not in PATH at all.
+#[cfg(target_os = "windows")]
+fn resolve_windows_cmd(cmd: &str) -> Option<String> {
+    Command::new("where")
+        .arg(cmd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+}
+
+fn spawn_cmd(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) -> Result<Child> {
+    let result = make_command(cmd, args, cwd, options).spawn();
+
+    // On Windows, npm-installed CLIs (claude, codex) are distributed as .cmd wrappers
+    // which require cmd.exe to invoke — `CreateProcess` won't find them directly.
+    // If the direct spawn failed, check PATH via `where.exe` and retry with `cmd /C`.
+    #[cfg(target_os = "windows")]
+    if result.is_err() {
+        if resolve_windows_cmd(cmd).is_none() {
+            return Err(anyhow::anyhow!(
+                "`{cmd}` is not installed or not in PATH\n  \
+                 → Install it, or switch to dry-run mode with: wisp mode dry-run"
+            ));
+        }
+        let mut win_args = vec!["/C".to_string(), cmd.to_string()];
+        win_args.extend_from_slice(args);
+        return make_command("cmd", &win_args, cwd, options)
+            .spawn()
+            .map_err(|e| anyhow::Error::from(e));
+    }
+
+    result.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             anyhow::anyhow!(
                 "`{cmd}` is not installed or not in PATH\n  \

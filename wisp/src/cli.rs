@@ -630,11 +630,23 @@ pub fn doctor() {
 }
 
 fn cmd_available(cmd: &str, arg: &str) -> bool {
-    Command::new(cmd)
-        .arg(arg)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    // On Windows, npm CLIs are .cmd wrappers — invoke via cmd.exe so they're found.
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", cmd, arg])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new(cmd)
+            .arg(arg)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
 }
 
 pub fn summon(task: &str, execute_agents: bool, allow_dirty: bool, permission: PermissionMode) {
