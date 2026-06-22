@@ -264,6 +264,7 @@ also update the tests
 # Project setup
 wisp init                                           # create wisp.toml + .wisp/
 wisp doctor                                         # check git, agents, config
+wisp update                                         # update wisp to the latest version
 
 # Workflow (4-step: implement → patch → review → ship)
 wisp summon "<task>"                                # dry-run preview
@@ -405,9 +406,9 @@ Wisp is built around the principle that **agents should suggest, not decide**.
 
 ### Release order
 
-1. **Bump versions** in both files:
+1. **Bump versions** — only `wisp/Cargo.toml` needs to be updated manually:
    - `wisp/Cargo.toml` — `version = "x.y.z"`
-   - `npm/package.json` — `"version": "x.y.z"`
+   - `npm/package.json` — updated automatically by the CD workflow
 
 2. **Run local validation:**
 
@@ -425,7 +426,7 @@ Wisp is built around the principle that **agents should suggest, not decide**.
    git push origin v0.1.0
    ```
 
-4. **Confirm all GitHub Release assets are present** before continuing:
+4. **Confirm all GitHub Release assets are present** (the CD workflow handles npm publish automatically after this):
    - `wisp-windows-x86_64.exe`
    - `wisp-windows-aarch64.exe`
    - `wisp-linux-x86_64`
@@ -433,22 +434,11 @@ Wisp is built around the principle that **agents should suggest, not decide**.
    - `wisp-darwin-x86_64`
    - `wisp-darwin-aarch64`
 
-5. **Verify the npm package one final time:**
-
-   ```sh
-   npm pack --dry-run --prefix npm
-   ```
-
-6. **Publish:**
-
-   ```sh
-   cd npm
-   npm publish
-   ```
+The CD workflow automatically publishes to npm once all GitHub Release assets are confirmed. No manual npm publish step needed.
 
 ### Important: publish order matters
 
-The npm postinstall script is intentionally non-fatal — if the binary download fails it prints a source-build fallback message and exits cleanly. This means `npm publish` will succeed even if no GitHub Release assets exist yet. **Publish to npm only after all GitHub Release assets are confirmed**, otherwise users may install the package but get a missing-binary error at runtime.
+The npm postinstall script is intentionally non-fatal — if the binary download fails it prints a source-build fallback message and exits cleanly. The CD workflow runs `npm publish` only after the GitHub Release job completes, so the assets are always available first.
 
 ### Windows ARM64 note
 
@@ -468,7 +458,7 @@ cargo test
 ```
 
 - Code lives in `wisp/src/`
-- No heavy dependencies — only `clap`, `serde`, `toml`, `anyhow`, `chrono`
+- No heavy dependencies — only `clap`, `serde`, `toml`, `anyhow`, `chrono`, `ureq`, `serde_json`
 - PRs against `develop-ai` branch
 
 ---

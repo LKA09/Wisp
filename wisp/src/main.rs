@@ -9,6 +9,7 @@ mod instructions;
 mod language;
 mod policy;
 mod session;
+mod update;
 mod workflow;
 
 use crate::agent::PermissionMode;
@@ -49,6 +50,8 @@ enum Commands {
         #[arg(long, value_enum, default_value = "interactive")]
         permission: PermissionMode,
     },
+    /// Update Wisp to the latest version
+    Update,
     /// Run a single agent directly
     Ask {
         /// The agent name, for example claude or codex
@@ -79,6 +82,7 @@ fn main() {
         None => cli::interactive(),
         Some(Commands::Init { force }) => cli::init(force),
         Some(Commands::Doctor) => cli::doctor(),
+        Some(Commands::Update) => cli::update(),
         Some(Commands::Summon {
             task,
             execute_agents,

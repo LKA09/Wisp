@@ -538,6 +538,13 @@ pub fn init(force: bool) {
     display::init_done();
 }
 
+pub fn update() {
+    if let Err(e) = crate::update::run() {
+        eprintln!("Update failed: {e}");
+        std::process::exit(1);
+    }
+}
+
 pub fn doctor() {
     use crate::display;
 

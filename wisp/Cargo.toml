@@ -13,3 +13,5 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 anyhow = "1"
 chrono = "0.4"
+ureq = { version = "2", default-features = false, features = ["rustls", "json"] }
+serde_json = "1"
