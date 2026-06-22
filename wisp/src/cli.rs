@@ -83,6 +83,18 @@ pub fn parse_interactive_action(input: &str) -> InteractiveAction {
         return parse_execute_command(task.trim(), PermissionMode::Auto);
     }
 
+    if let Some(task) = trimmed.strip_prefix("/dry ") {
+        return InteractiveAction::DryRunWorkflow {
+            task: task.trim().into(),
+        };
+    }
+
+    if trimmed == "/dry" {
+        return InteractiveAction::DryRunWorkflow {
+            task: String::new(),
+        };
+    }
+
     if let Some(query) = trimmed.strip_prefix('/') {
         return InteractiveAction::PreviewCommands {
             query: query.trim().to_string(),
@@ -117,8 +129,9 @@ pub fn parse_interactive_action(input: &str) -> InteractiveAction {
         };
     }
 
-    InteractiveAction::DryRunWorkflow {
+    InteractiveAction::ExecuteWorkflow {
         task: trimmed.into(),
+        permission_mode: PermissionMode::Interactive,
     }
 }
 
@@ -143,6 +156,11 @@ fn parse_multiline_action(trimmed: &str) -> InteractiveAction {
             "/auto" => {
                 return parse_execute_command(task, PermissionMode::Auto);
             }
+            "/dry" => {
+                return InteractiveAction::DryRunWorkflow {
+                    task: task.trim().to_string(),
+                };
+            }
             "/claude" => {
                 return InteractiveAction::ExecuteSingleAgent {
                     agent: "claude".into(),
@@ -161,9 +179,10 @@ fn parse_multiline_action(trimmed: &str) -> InteractiveAction {
         }
     }
 
-    // No recognized trailing command — dry-run with full text.
-    InteractiveAction::DryRunWorkflow {
+    // No recognized trailing command — execute workflow with full text.
+    InteractiveAction::ExecuteWorkflow {
         task: trimmed.into(),
+        permission_mode: PermissionMode::Interactive,
     }
 }
 
@@ -756,9 +775,31 @@ mod tests {
     }
 
     #[test]
-    fn parses_bare_task_as_dry_run() {
+    fn parses_bare_task_as_execute() {
         assert_eq!(
             parse_interactive_action("explain this repo"),
+            InteractiveAction::ExecuteWorkflow {
+                task: "explain this repo".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_multiline_pasted_task_as_execute() {
+        assert_eq!(
+            parse_interactive_action("review this repo\nfocus on auth\nand tests"),
+            InteractiveAction::ExecuteWorkflow {
+                task: "review this repo\nfocus on auth\nand tests".into(),
+                permission_mode: PermissionMode::Interactive,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_bang_prefix_as_dry_run() {
+        assert_eq!(
+            parse_interactive_action("!explain this repo"),
             InteractiveAction::DryRunWorkflow {
                 task: "explain this repo".into()
             }
@@ -766,11 +807,22 @@ mod tests {
     }
 
     #[test]
-    fn parses_multiline_pasted_task_as_one_dry_run() {
+    fn parses_dry_command_as_dry_run() {
         assert_eq!(
-            parse_interactive_action("review this repo\nfocus on auth\nand tests"),
+            parse_interactive_action("/dry fix the auth bug"),
             InteractiveAction::DryRunWorkflow {
-                task: "review this repo\nfocus on auth\nand tests".into()
+                task: "fix the auth bug".into()
+            }
+        );
+    }
+
+    #[test]
+    fn multiline_with_trailing_dry_is_dry_run() {
+        let input = "fix the auth bug\ncheck edge cases\n/dry";
+        assert_eq!(
+            parse_interactive_action(input),
+            InteractiveAction::DryRunWorkflow {
+                task: "fix the auth bug\ncheck edge cases".into(),
             }
         );
     }
@@ -836,12 +888,13 @@ mod tests {
     }
 
     #[test]
-    fn multiline_no_trailing_command_is_dry_run() {
+    fn multiline_no_trailing_command_is_execute() {
         let input = "fix the auth bug\nfocus on tests\nlook at src/auth.rs";
         assert_eq!(
             parse_interactive_action(input),
-            InteractiveAction::DryRunWorkflow {
+            InteractiveAction::ExecuteWorkflow {
                 task: "fix the auth bug\nfocus on tests\nlook at src/auth.rs".into(),
+                permission_mode: PermissionMode::Interactive,
             }
         );
     }
