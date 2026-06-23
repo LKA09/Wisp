@@ -105,6 +105,7 @@ const COMPLETIONS: &[(&str, &str)] = &[
     ("/auto", "execute workflow (auto-approve)"),
     ("/claude", "run Claude directly"),
     ("/codex", "run Codex directly"),
+    ("/mode", "show or set dry-run / execute mode"),
     ("/paste", "enter multi-line paste mode"),
     ("/help", "show commands"),
     ("/exit", "exit wisp"),
@@ -202,9 +203,9 @@ pub fn interactive_header() {
     println!("     {GRAY}Claude implements · Codex ships · you stay in control{RESET}");
     println!("{rule}");
     println!();
-    println!("  Type a task and press Enter {GRAY}—{RESET} default is dry-run preview.");
+    println!("  Type a task and press Enter.  Use {WHITE}/mode{RESET} to set dry-run or execute default.");
     println!(
-        "  {GRAY}Default is dry-run.  Use {WHITE}/run{GRAY} to execute  ·  {WHITE}exit{GRAY} to quit.{RESET}"
+        "  {GRAY}Use {WHITE}/run{GRAY} to execute  ·  {WHITE}/mode dry-run{GRAY} or {WHITE}/mode execute{GRAY}  ·  {WHITE}exit{GRAY} to quit.{RESET}"
     );
     println!();
 }
@@ -237,11 +238,12 @@ pub fn interactive_help() {
     println!();
 
     let cmds: &[(&str, &str)] = &[
-        ("<task>", "plan workflow (dry-run)"),
+        ("<task>", "run task (respects /mode setting)"),
         ("/run <task>", "execute workflow interactively"),
         ("/auto <task>", "execute workflow (auto-approve)"),
         ("/claude <task>", "run Claude directly"),
         ("/codex <task>", "run Codex directly"),
+        ("/mode [dry-run|execute]", "show or set default mode"),
         ("/paste", "enter explicit multi-line paste mode"),
         ("/help", "show this help"),
         ("exit / quit", "exit wisp"),
@@ -270,17 +272,18 @@ pub fn interactive_help() {
 
 pub fn interactive_command_preview(query: &str) {
     let all: &[(&str, &str)] = &[
-        ("run", "/run <task>      —  execute workflow interactively"),
+        ("run", "/run <task>           —  execute workflow interactively"),
         (
             "auto",
-            "/auto <task>     —  execute workflow (auto-approve)",
+            "/auto <task>          —  execute workflow (auto-approve)",
         ),
-        ("claude", "/claude <task>   —  run Claude directly"),
-        ("codex", "/codex <task>    —  run Codex directly"),
-        ("paste", "/paste           —  multi-line paste mode"),
-        ("help", "/help            —  show all commands"),
-        ("exit", "/exit            —  exit wisp"),
-        ("quit", "/quit            —  exit wisp"),
+        ("claude", "/claude <task>        —  run Claude directly"),
+        ("codex", "/codex <task>         —  run Codex directly"),
+        ("mode", "/mode [dry-run|execute] —  set default mode"),
+        ("paste", "/paste                —  multi-line paste mode"),
+        ("help", "/help                 —  show all commands"),
+        ("exit", "/exit                 —  exit wisp"),
+        ("quit", "/quit                 —  exit wisp"),
     ];
 
     let matches: Vec<&str> = if query.is_empty() {
@@ -533,4 +536,42 @@ impl Drop for ThinkingSpinner {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+// ─── Mode display ─────────────────────────────────────────────────────────────
+
+pub fn mode_status(execute_agents: bool) {
+    if execute_agents {
+        println!(
+            "  {ACCENT}✦{RESET}  mode: {GREEN}{BOLD}execute{RESET}  \
+             {GRAY}— bare tasks invoke agents{RESET}"
+        );
+        println!(
+            "  {GRAY}Use {WHITE}/mode dry-run{GRAY} to switch to preview-only.{RESET}"
+        );
+    } else {
+        println!(
+            "  {ACCENT}✦{RESET}  mode: {WHITE}{BOLD}dry-run{RESET}  \
+             {GRAY}— bare tasks show a preview only (default){RESET}"
+        );
+        println!(
+            "  {GRAY}Use {WHITE}/mode execute{GRAY} to invoke agents for bare tasks.{RESET}"
+        );
+    }
+    println!();
+}
+
+pub fn mode_set(execute_agents: bool) {
+    if execute_agents {
+        println!(
+            "  {GREEN}✓{RESET}  mode set to {GREEN}{BOLD}execute{RESET}  \
+             {GRAY}— bare tasks will invoke agents{RESET}"
+        );
+    } else {
+        println!(
+            "  {GREEN}✓{RESET}  mode set to {WHITE}{BOLD}dry-run{RESET}  \
+             {GRAY}— bare tasks will show a preview only{RESET}"
+        );
+    }
+    println!();
 }

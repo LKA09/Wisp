@@ -13,6 +13,12 @@ pub enum InteractiveAction {
     DryRunWorkflow {
         task: String,
     },
+    /// Bare input or multi-line with no trailing command — respects saved mode setting.
+    BareTask {
+        task: String,
+        permission_mode: PermissionMode,
+    },
+    /// Explicitly requested execution (e.g. /run, /exec, /auto).
     ExecuteWorkflow {
         task: String,
         permission_mode: PermissionMode,
@@ -24,6 +30,9 @@ pub enum InteractiveAction {
     },
     PreviewCommands {
         query: String,
+    },
+    ModeAction {
+        arg: Option<String>,
     },
     EnterPasteMode,
     Help,
@@ -47,7 +56,14 @@ pub fn parse_interactive_action(input: &str) -> InteractiveAction {
         "exit" | "quit" | "q" | "/exit" | "/quit" => return InteractiveAction::Exit,
         "/help" | "/commands" | "help" => return InteractiveAction::Help,
         "/paste" => return InteractiveAction::EnterPasteMode,
+        "/mode" => return InteractiveAction::ModeAction { arg: None },
         _ => {}
+    }
+
+    if let Some(arg) = trimmed.strip_prefix("/mode ") {
+        return InteractiveAction::ModeAction {
+            arg: Some(arg.trim().to_string()),
+        };
     }
 
     // Multi-line input: detect trailing command on the last non-empty line.
@@ -129,7 +145,7 @@ pub fn parse_interactive_action(input: &str) -> InteractiveAction {
         };
     }
 
-    InteractiveAction::ExecuteWorkflow {
+    InteractiveAction::BareTask {
         task: trimmed.into(),
         permission_mode: PermissionMode::Interactive,
     }
@@ -179,8 +195,8 @@ fn parse_multiline_action(trimmed: &str) -> InteractiveAction {
         }
     }
 
-    // No recognized trailing command — execute workflow with full text.
-    InteractiveAction::ExecuteWorkflow {
+    // No recognized trailing command — use bare-task (respects mode setting).
+    InteractiveAction::BareTask {
         task: trimmed.into(),
         permission_mode: PermissionMode::Interactive,
     }
@@ -262,8 +278,18 @@ fn dispatch(trimmed: &str) -> bool {
             // If we get here, just show the paste mode hint.
             display::paste_mode_enter();
         }
+        InteractiveAction::ModeAction { arg } => {
+            mode(arg.as_deref());
+        }
         InteractiveAction::DryRunWorkflow { task } => {
             run_summon_command(&task, false, false, PermissionMode::Interactive);
+        }
+        InteractiveAction::BareTask {
+            task,
+            permission_mode,
+        } => {
+            let execute = crate::settings::Settings::load().execute_agents;
+            run_summon_command(&task, execute, false, permission_mode);
         }
         InteractiveAction::ExecuteWorkflow {
             task,
@@ -611,17 +637,16 @@ pub fn doctor() {
 }
 
 fn cmd_available(cmd: &str, arg: &str) -> bool {
-    // On Windows, npm global binaries are installed as .cmd scripts.
-    // Command::new only finds .exe, so we invoke through cmd.exe instead.
-    #[cfg(windows)]
+    // On Windows, npm CLIs are .cmd wrappers — invoke via cmd.exe so they're found.
+    #[cfg(target_os = "windows")]
     {
         Command::new("cmd")
-            .args(["/c", cmd, arg])
+            .args(["/C", cmd, arg])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
     }
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     {
         Command::new(cmd)
             .arg(arg)
@@ -643,6 +668,38 @@ pub fn ask(
     permission: PermissionMode,
 ) {
     run_single_agent_command(agent, task, execute_agents, allow_dirty, permission);
+}
+
+pub fn mode(arg: Option<&str>) {
+    use crate::{display, settings};
+
+    let mut s = settings::Settings::load();
+    match arg {
+        None => {
+            display::mode_status(s.execute_agents);
+        }
+        Some("dry" | "dry-run") => {
+            s.execute_agents = false;
+            if let Err(e) = s.save() {
+                eprintln!("Error saving settings: {e}");
+                return;
+            }
+            display::mode_set(false);
+        }
+        Some("execute" | "run" | "exec") => {
+            s.execute_agents = true;
+            if let Err(e) = s.save() {
+                eprintln!("Error saving settings: {e}");
+                return;
+            }
+            display::mode_set(true);
+        }
+        Some(other) => {
+            eprintln!(
+                "Unknown mode: '{other}'. Use 'dry-run' (preview only) or 'execute' (invoke agents)."
+            );
+        }
+    }
 }
 
 fn run_summon_command(
@@ -775,10 +832,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_bare_task_as_execute() {
+    fn parses_bare_task_as_bare_task() {
         assert_eq!(
             parse_interactive_action("explain this repo"),
-            InteractiveAction::ExecuteWorkflow {
+            InteractiveAction::BareTask {
                 task: "explain this repo".into(),
                 permission_mode: PermissionMode::Interactive,
             }
@@ -786,10 +843,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_multiline_pasted_task_as_execute() {
+    fn parses_multiline_pasted_task_as_bare_task() {
         assert_eq!(
             parse_interactive_action("review this repo\nfocus on auth\nand tests"),
-            InteractiveAction::ExecuteWorkflow {
+            InteractiveAction::BareTask {
                 task: "review this repo\nfocus on auth\nand tests".into(),
                 permission_mode: PermissionMode::Interactive,
             }
@@ -888,11 +945,11 @@ mod tests {
     }
 
     #[test]
-    fn multiline_no_trailing_command_is_execute() {
+    fn multiline_no_trailing_command_is_bare_task() {
         let input = "fix the auth bug\nfocus on tests\nlook at src/auth.rs";
         assert_eq!(
             parse_interactive_action(input),
-            InteractiveAction::ExecuteWorkflow {
+            InteractiveAction::BareTask {
                 task: "fix the auth bug\nfocus on tests\nlook at src/auth.rs".into(),
                 permission_mode: PermissionMode::Interactive,
             }
@@ -974,6 +1031,34 @@ mod tests {
             InteractiveAction::ExecuteWorkflow {
                 task: "fix bug".into(),
                 permission_mode: PermissionMode::Interactive,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_mode_command_no_arg() {
+        assert_eq!(
+            parse_interactive_action("/mode"),
+            InteractiveAction::ModeAction { arg: None }
+        );
+    }
+
+    #[test]
+    fn parses_mode_command_dry_run() {
+        assert_eq!(
+            parse_interactive_action("/mode dry-run"),
+            InteractiveAction::ModeAction {
+                arg: Some("dry-run".into())
+            }
+        );
+    }
+
+    #[test]
+    fn parses_mode_command_execute() {
+        assert_eq!(
+            parse_interactive_action("/mode execute"),
+            InteractiveAction::ModeAction {
+                arg: Some("execute".into())
             }
         );
     }

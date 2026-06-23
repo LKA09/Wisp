@@ -10,6 +10,7 @@ mod language;
 mod policy;
 mod session;
 mod update;
+mod settings;
 mod workflow;
 
 use crate::agent::PermissionMode;
@@ -68,6 +69,12 @@ enum Commands {
         #[arg(long, value_enum, default_value = "interactive")]
         permission: PermissionMode,
     },
+    /// Show or set the default execution mode (dry-run / execute)
+    Mode {
+        /// "dry-run" or "execute" — omit to show current mode
+        #[arg(value_name = "MODE")]
+        mode: Option<String>,
+    },
 }
 
 fn main() {
@@ -99,6 +106,9 @@ fn main() {
             permission,
         }) => {
             cli::ask(&agent, &task, execute_agents, allow_dirty, permission);
+        }
+        Some(Commands::Mode { mode }) => {
+            cli::mode(mode.as_deref());
         }
     }
 }

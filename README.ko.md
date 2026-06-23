@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-a78bfa.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-a78bfa.svg)](#설치)
 
-**[English](README.md)** · [빠른 시작](#빠른-시작) · [동작 방식](#동작-방식) · [설정](#설정) · [CLI 레퍼런스](#cli-레퍼런스)
+**[English](README.md)** · **[简体中文](README.zh-CN.md)** · [빠른 시작](#빠른-시작) · [동작 방식](#동작-방식) · [설정](#설정) · [CLI 레퍼런스](#cli-레퍼런스)
 
 </div>
 

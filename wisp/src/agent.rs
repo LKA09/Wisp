@@ -32,6 +32,7 @@ pub struct AgentRunOptions {
 pub struct PreparedAgentCommand {
     pub cmd: String,
     pub args: Vec<String>,
+    pub stdin_payload: Option<String>,
 }
 
 #[derive(Debug)]
@@ -109,9 +110,12 @@ pub fn prepare_command(
         .iter()
         .map(|arg| substitute_placeholders(arg, &vars))
         .collect::<Vec<_>>();
+    let input_mode = resolve_input_mode(&config.input);
     PreparedAgentCommand {
         cmd: config.cmd.clone(),
         args: resolved_args,
+        stdin_payload: matches!(input_mode, AgentInputMode::PromptViaStdinClosed)
+            .then(|| prompt.to_string()),
     }
 }
 
@@ -123,7 +127,7 @@ fn substitute_placeholders(input: &str, vars: &HashMap<String, String>) -> Strin
     result
 }
 
-fn spawn_cmd(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) -> Result<Child> {
+fn make_command(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) -> Command {
     let mut command = Command::new(cmd);
     command
         .args(args)
@@ -134,14 +138,101 @@ fn spawn_cmd(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) 
             | AgentInputMode::PromptViaArgs
             | AgentInputMode::InteractiveStdin => Stdio::inherit(),
         });
-
     if options.capture_output {
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
     } else {
         command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
     }
+    command
+}
 
-    Ok(command.spawn()?)
+fn command_not_found_error(cmd: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "`{cmd}` is not installed or not in PATH\n  \
+         -> Install it, or switch to dry-run mode with: wisp mode dry-run"
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_windows_cmd(cmd: &str) -> Option<String> {
+    let escaped = cmd.replace('\'', "''");
+    let script = format!(
+        "$resolved = Get-Command -Name '{escaped}' -ErrorAction SilentlyContinue | \
+         Select-Object -First 1 -ExpandProperty Source; if ($resolved) {{ Write-Output $resolved }}"
+    );
+
+    Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_windows_resolved(
+    resolved: &str,
+    args: &[String],
+    cwd: &Path,
+    options: &AgentRunOptions,
+) -> std::io::Result<Child> {
+    let resolved_path = Path::new(resolved);
+    let ext = resolved_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default();
+
+    if ext.eq_ignore_ascii_case("ps1") {
+        let cmd_sibling = resolved_path.with_extension("cmd");
+        if cmd_sibling.exists() {
+            let mut cmd_args = vec!["/C".to_string(), cmd_sibling.display().to_string()];
+            cmd_args.extend_from_slice(args);
+            return make_command("cmd", &cmd_args, cwd, options).spawn();
+        }
+
+        let mut ps_args = vec![
+            "-NoProfile".to_string(),
+            "-ExecutionPolicy".to_string(),
+            "Bypass".to_string(),
+            "-File".to_string(),
+            resolved.to_string(),
+        ];
+        ps_args.extend_from_slice(args);
+        make_command("powershell", &ps_args, cwd, options).spawn()
+    } else if ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat") {
+        let mut cmd_args = vec!["/C".to_string(), resolved.to_string()];
+        cmd_args.extend_from_slice(args);
+        make_command("cmd", &cmd_args, cwd, options).spawn()
+    } else {
+        make_command(resolved, args, cwd, options).spawn()
+    }
+}
+
+fn spawn_cmd(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) -> Result<Child> {
+    let result = make_command(cmd, args, cwd, options).spawn();
+
+    #[cfg(target_os = "windows")]
+    if let Err(err) = result {
+        if let Some(resolved) = resolve_windows_cmd(cmd) {
+            return spawn_windows_resolved(&resolved, args, cwd, options)
+                .map_err(anyhow::Error::from);
+        }
+
+        return Err(if err.kind() == std::io::ErrorKind::NotFound {
+            command_not_found_error(cmd)
+        } else {
+            anyhow::Error::from(err)
+        });
+    }
+
+    result.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            command_not_found_error(cmd)
+        } else {
+            anyhow::Error::from(e)
+        }
+    })
 }
 
 impl SubprocessRunner {
@@ -151,9 +242,15 @@ impl SubprocessRunner {
         cwd: &Path,
         mut on_chunk: F,
     ) -> Result<AgentOutput> {
-        use std::io::{BufRead, BufReader, Read};
+        use std::io::{BufRead, BufReader, Read, Write};
 
         let mut child = spawn_cmd(&prepared.cmd, &prepared.args, cwd, &self.options)?;
+
+        if let Some(payload) = &prepared.stdin_payload {
+            let mut stdin = child.stdin.take().context("stdin pipe missing")?;
+            stdin.write_all(payload.as_bytes())?;
+            drop(stdin);
+        }
 
         if !self.options.capture_output {
             let status = child.wait()?;
@@ -170,10 +267,15 @@ impl SubprocessRunner {
 
         let stdout_tx = tx.clone();
         let stdout_thread = thread::spawn(move || -> Result<()> {
-            for line in BufReader::new(stdout).lines() {
-                let line = line?;
-                let mut chunk = line;
-                chunk.push('\n');
+            let mut reader = BufReader::new(stdout);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                let bytes_read = reader.read_until(b'\n', &mut buf)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                let chunk = String::from_utf8_lossy(&buf).into_owned();
                 if stdout_tx.send(StreamEvent::Stdout(chunk)).is_err() {
                     break;
                 }
@@ -182,8 +284,9 @@ impl SubprocessRunner {
         });
 
         let stderr_thread = thread::spawn(move || -> Result<()> {
-            let mut collected = String::new();
-            BufReader::new(stderr).read_to_string(&mut collected)?;
+            let mut collected = Vec::new();
+            BufReader::new(stderr).read_to_end(&mut collected)?;
+            let collected = String::from_utf8_lossy(&collected).into_owned();
             let _ = tx.send(StreamEvent::Stderr(collected));
             Ok(())
         });
@@ -224,8 +327,8 @@ impl DryRunRunner {
     /// Display a dry-run preview for one agent step.
     ///
     /// Shows the agent name, role, command, prompt path, and a compact
-    /// summary of the prompt.  The returned `AgentOutput.stdout` is a
-    /// neutral marker that does NOT contain review-decision tokens, so
+    /// summary of the prompt. The returned `AgentOutput.stdout` is a
+    /// neutral marker that does not contain review-decision tokens, so
     /// callers can detect "dry-run preview" without confusing the review
     /// decision parser.
     pub fn display_and_capture(
@@ -275,18 +378,37 @@ impl DryRunRunner {
                 display::agent_line(line);
             }
             display::agent_line(&format!(
-                "  \x1b[90m[{prompt_char_count} chars, {} lines — full prompt written to session]\x1b[0m",
+                "  \x1b[90m[{prompt_char_count} chars, {} lines - full prompt written to session]\x1b[0m",
                 lines.len()
             ));
         }
 
-        // Return a neutral marker.  Must NOT contain APPROVED / CHANGES_REQUESTED /
-        // NEEDS_USER_DECISION so that callers do not accidentally parse a review decision
-        // from dry-run output.
         AgentOutput {
             status: 0,
             stdout: "[dry-run preview]".to_string(),
             stderr: String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "windows")]
+    use std::path::Path;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_wrapper_extensions_are_detected() {
+        let claude_ext = Path::new(r"C:\Users\me\AppData\Roaming\npm\claude.ps1")
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap();
+        let codex_ext = Path::new(r"C:\Users\me\AppData\Roaming\npm\codex.cmd")
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap();
+
+        assert!(claude_ext.eq_ignore_ascii_case("ps1"));
+        assert!(codex_ext.eq_ignore_ascii_case("cmd"));
     }
 }
