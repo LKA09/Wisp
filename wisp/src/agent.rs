@@ -32,6 +32,7 @@ pub struct AgentRunOptions {
 pub struct PreparedAgentCommand {
     pub cmd: String,
     pub args: Vec<String>,
+    pub stdin_payload: Option<String>,
 }
 
 #[derive(Debug)]
@@ -109,9 +110,12 @@ pub fn prepare_command(
         .iter()
         .map(|arg| substitute_placeholders(arg, &vars))
         .collect::<Vec<_>>();
+    let input_mode = resolve_input_mode(&config.input);
     PreparedAgentCommand {
         cmd: config.cmd.clone(),
         args: resolved_args,
+        stdin_payload: matches!(input_mode, AgentInputMode::PromptViaStdinClosed)
+            .then(|| prompt.to_string()),
     }
 }
 
@@ -230,9 +234,15 @@ impl SubprocessRunner {
         cwd: &Path,
         mut on_chunk: F,
     ) -> Result<AgentOutput> {
-        use std::io::{BufRead, BufReader, Read};
+        use std::io::{BufRead, BufReader, Read, Write};
 
         let mut child = spawn_cmd(&prepared.cmd, &prepared.args, cwd, &self.options)?;
+
+        if let Some(payload) = &prepared.stdin_payload {
+            let mut stdin = child.stdin.take().context("stdin pipe missing")?;
+            stdin.write_all(payload.as_bytes())?;
+            drop(stdin);
+        }
 
         if !self.options.capture_output {
             let status = child.wait()?;
