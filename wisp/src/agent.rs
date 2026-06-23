@@ -177,12 +177,20 @@ fn spawn_windows_resolved(
     cwd: &Path,
     options: &AgentRunOptions,
 ) -> std::io::Result<Child> {
-    let ext = Path::new(resolved)
+    let resolved_path = Path::new(resolved);
+    let ext = resolved_path
         .extension()
         .and_then(|ext| ext.to_str())
         .unwrap_or_default();
 
     if ext.eq_ignore_ascii_case("ps1") {
+        let cmd_sibling = resolved_path.with_extension("cmd");
+        if cmd_sibling.exists() {
+            let mut cmd_args = vec!["/C".to_string(), cmd_sibling.display().to_string()];
+            cmd_args.extend_from_slice(args);
+            return make_command("cmd", &cmd_args, cwd, options).spawn();
+        }
+
         let mut ps_args = vec![
             "-NoProfile".to_string(),
             "-ExecutionPolicy".to_string(),
