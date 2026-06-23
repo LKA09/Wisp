@@ -259,10 +259,15 @@ impl SubprocessRunner {
 
         let stdout_tx = tx.clone();
         let stdout_thread = thread::spawn(move || -> Result<()> {
-            for line in BufReader::new(stdout).lines() {
-                let line = line?;
-                let mut chunk = line;
-                chunk.push('\n');
+            let mut reader = BufReader::new(stdout);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                let bytes_read = reader.read_until(b'\n', &mut buf)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                let chunk = String::from_utf8_lossy(&buf).into_owned();
                 if stdout_tx.send(StreamEvent::Stdout(chunk)).is_err() {
                     break;
                 }
@@ -271,8 +276,9 @@ impl SubprocessRunner {
         });
 
         let stderr_thread = thread::spawn(move || -> Result<()> {
-            let mut collected = String::new();
-            BufReader::new(stderr).read_to_string(&mut collected)?;
+            let mut collected = Vec::new();
+            BufReader::new(stderr).read_to_end(&mut collected)?;
+            let collected = String::from_utf8_lossy(&collected).into_owned();
             let _ = tx.send(StreamEvent::Stderr(collected));
             Ok(())
         });
