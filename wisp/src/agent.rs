@@ -142,12 +142,23 @@ fn make_command(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOption
     command
 }
 
-/// On Windows, look up `cmd` via `where.exe` to find .cmd/.bat wrappers (e.g. npm CLIs).
-/// Returns the resolved path string if found, or `None` if not in PATH at all.
+fn command_not_found_error(cmd: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "`{cmd}` is not installed or not in PATH\n  \
+         -> Install it, or switch to dry-run mode with: wisp mode dry-run"
+    )
+}
+
 #[cfg(target_os = "windows")]
 fn resolve_windows_cmd(cmd: &str) -> Option<String> {
-    Command::new("where")
-        .arg(cmd)
+    let escaped = cmd.replace('\'', "''");
+    let script = format!(
+        "$resolved = Get-Command -Name '{escaped}' -ErrorAction SilentlyContinue | \
+         Select-Object -First 1 -ExpandProperty Source; if ($resolved) {{ Write-Output $resolved }}"
+    );
+
+    Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -155,33 +166,57 @@ fn resolve_windows_cmd(cmd: &str) -> Option<String> {
         .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
 }
 
+#[cfg(target_os = "windows")]
+fn spawn_windows_resolved(
+    resolved: &str,
+    args: &[String],
+    cwd: &Path,
+    options: &AgentRunOptions,
+) -> std::io::Result<Child> {
+    let ext = Path::new(resolved)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default();
+
+    if ext.eq_ignore_ascii_case("ps1") {
+        let mut ps_args = vec![
+            "-NoProfile".to_string(),
+            "-ExecutionPolicy".to_string(),
+            "Bypass".to_string(),
+            "-File".to_string(),
+            resolved.to_string(),
+        ];
+        ps_args.extend_from_slice(args);
+        make_command("powershell", &ps_args, cwd, options).spawn()
+    } else if ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat") {
+        let mut cmd_args = vec!["/C".to_string(), resolved.to_string()];
+        cmd_args.extend_from_slice(args);
+        make_command("cmd", &cmd_args, cwd, options).spawn()
+    } else {
+        make_command(resolved, args, cwd, options).spawn()
+    }
+}
+
 fn spawn_cmd(cmd: &str, args: &[String], cwd: &Path, options: &AgentRunOptions) -> Result<Child> {
     let result = make_command(cmd, args, cwd, options).spawn();
 
-    // On Windows, npm-installed CLIs (claude, codex) are distributed as .cmd wrappers
-    // which require cmd.exe to invoke — `CreateProcess` won't find them directly.
-    // If the direct spawn failed, check PATH via `where.exe` and retry with `cmd /C`.
     #[cfg(target_os = "windows")]
-    if result.is_err() {
-        if resolve_windows_cmd(cmd).is_none() {
-            return Err(anyhow::anyhow!(
-                "`{cmd}` is not installed or not in PATH\n  \
-                 → Install it, or switch to dry-run mode with: wisp mode dry-run"
-            ));
+    if let Err(err) = result {
+        if let Some(resolved) = resolve_windows_cmd(cmd) {
+            return spawn_windows_resolved(&resolved, args, cwd, options)
+                .map_err(anyhow::Error::from);
         }
-        let mut win_args = vec!["/C".to_string(), cmd.to_string()];
-        win_args.extend_from_slice(args);
-        return make_command("cmd", &win_args, cwd, options)
-            .spawn()
-            .map_err(|e| anyhow::Error::from(e));
+
+        return Err(if err.kind() == std::io::ErrorKind::NotFound {
+            command_not_found_error(cmd)
+        } else {
+            anyhow::Error::from(err)
+        });
     }
 
     result.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            anyhow::anyhow!(
-                "`{cmd}` is not installed or not in PATH\n  \
-                 → Install it, or switch to dry-run mode with: wisp mode dry-run"
-            )
+            command_not_found_error(cmd)
         } else {
             anyhow::Error::from(e)
         }
@@ -268,8 +303,8 @@ impl DryRunRunner {
     /// Display a dry-run preview for one agent step.
     ///
     /// Shows the agent name, role, command, prompt path, and a compact
-    /// summary of the prompt.  The returned `AgentOutput.stdout` is a
-    /// neutral marker that does NOT contain review-decision tokens, so
+    /// summary of the prompt. The returned `AgentOutput.stdout` is a
+    /// neutral marker that does not contain review-decision tokens, so
     /// callers can detect "dry-run preview" without confusing the review
     /// decision parser.
     pub fn display_and_capture(
@@ -319,18 +354,37 @@ impl DryRunRunner {
                 display::agent_line(line);
             }
             display::agent_line(&format!(
-                "  \x1b[90m[{prompt_char_count} chars, {} lines — full prompt written to session]\x1b[0m",
+                "  \x1b[90m[{prompt_char_count} chars, {} lines - full prompt written to session]\x1b[0m",
                 lines.len()
             ));
         }
 
-        // Return a neutral marker.  Must NOT contain APPROVED / CHANGES_REQUESTED /
-        // NEEDS_USER_DECISION so that callers do not accidentally parse a review decision
-        // from dry-run output.
         AgentOutput {
             status: 0,
             stdout: "[dry-run preview]".to_string(),
             stderr: String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "windows")]
+    use std::path::Path;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_wrapper_extensions_are_detected() {
+        let claude_ext = Path::new(r"C:\Users\me\AppData\Roaming\npm\claude.ps1")
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap();
+        let codex_ext = Path::new(r"C:\Users\me\AppData\Roaming\npm\codex.cmd")
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap();
+
+        assert!(claude_ext.eq_ignore_ascii_case("ps1"));
+        assert!(codex_ext.eq_ignore_ascii_case("cmd"));
     }
 }
