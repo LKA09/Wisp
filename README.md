@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-a78bfa.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-a78bfa.svg)](#installation)
 
-**[한국어](README.ko.md)** · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Configuration](#configuration) · [Docs](#cli-reference)
+**[한국어](README.ko.md)** · **[简体中文](README.zh-CN.md)** · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Configuration](#configuration) · [Docs](#cli-reference)
 
 </div>
 

@@ -21,6 +21,24 @@ pub struct SummonArgs {
     pub lang: Language,
 }
 
+fn format_stdout_line(line: &str) -> String {
+    format!("> {}", colorize_diff_line(line))
+}
+
+fn format_stderr_line(line: &str) -> String {
+    format!("\x1b[90m[stderr]\x1b[0m {}", colorize_diff_line(line))
+}
+
+fn colorize_diff_line(line: &str) -> String {
+    if line.starts_with('+') && !line.starts_with("+++") {
+        format!("\x1b[32m{line}\x1b[0m")
+    } else if line.starts_with('-') && !line.starts_with("---") {
+        format!("\x1b[31m{line}\x1b[0m")
+    } else {
+        line.to_string()
+    }
+}
+
 pub struct SingleAgentArgs {
     pub agent: String,
     pub task: String,
@@ -570,6 +588,8 @@ fn run_agent_with_streaming(
     permission_mode: PermissionMode,
     cwd: &std::path::Path,
 ) -> AgentOutput {
+    const MAX_STDERR_DISPLAY_LINES: usize = 120;
+
     let runner = SubprocessRunner {
         options: AgentRunOptions {
             permission_mode,
@@ -579,8 +599,8 @@ fn run_agent_with_streaming(
         },
     };
     let mut spinner = display::ThinkingSpinner::start();
-    let mut at_line_start = true;
     let mut first_chunk = true;
+    let mut pending_line = String::new();
 
     let result = runner.run_streaming(prepared, cwd, |chunk| {
         use std::io::Write;
@@ -590,33 +610,37 @@ fn run_agent_with_streaming(
         }
 
         for ch in chunk.chars() {
-            if at_line_start {
-                print!("  > ");
-                at_line_start = false;
-            }
             match ch {
                 '\n' => {
-                    println!();
-                    at_line_start = true;
+                    display::agent_line(&format_stdout_line(&pending_line));
+                    pending_line.clear();
                 }
                 '\r' => {}
-                c => print!("{c}"),
+                c => pending_line.push(c),
             }
         }
         let _ = std::io::stdout().flush();
     });
 
     spinner.stop();
-    if !at_line_start {
-        println!();
+    if !pending_line.is_empty() {
+        display::agent_line(&format_stdout_line(&pending_line));
     }
 
     match result {
         Ok(out) => {
             if !out.stderr.is_empty() {
                 display::agent_blank();
-                for line in out.stderr.lines() {
-                    display::agent_line(&format!("\x1b[90m[stderr] {line}\x1b[0m"));
+                let stderr_lines: Vec<&str> = out.stderr.lines().collect();
+                let visible_lines = stderr_lines.len().min(MAX_STDERR_DISPLAY_LINES);
+                for line in stderr_lines.iter().take(visible_lines) {
+                    display::agent_line(&format_stderr_line(line));
+                }
+                if stderr_lines.len() > MAX_STDERR_DISPLAY_LINES {
+                    let omitted = stderr_lines.len() - MAX_STDERR_DISPLAY_LINES;
+                    display::agent_line(&format!(
+                        "\x1b[90m[stderr] ... {omitted} more line(s) omitted\x1b[0m"
+                    ));
                 }
             }
             out
