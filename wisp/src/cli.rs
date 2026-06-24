@@ -227,8 +227,7 @@ fn parse_execute_command(task: &str, permission_mode: PermissionMode) -> Interac
 
 pub fn interactive() {
     if let Err(e) = crate::tui::run() {
-        eprintln!("TUI error: {e}");
-        std::process::exit(1);
+        eprintln!("Error starting TUI: {e}");
     }
 }
 
@@ -270,13 +269,6 @@ pub fn init(force: bool) {
     }
 
     display::init_done();
-}
-
-pub fn update() {
-    if let Err(e) = crate::update::run() {
-        eprintln!("Update failed: {e}");
-        std::process::exit(1);
-    }
 }
 
 pub fn doctor() {

@@ -1,6 +1,6 @@
 [package]
 name = "wisp"
-version = "0.1.4"
+version = "0.1.0"
 edition = "2024"
 
 [[bin]]
@@ -13,8 +13,5 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 anyhow = "1"
 chrono = "0.4"
-ureq = { version = "2", features = ["json"] }
-native-tls = { version = "0.2", features = ["vendored"] }
-serde_json = "1"
 ratatui = "0.28"
-crossterm = "0.27"
+crossterm = "0.28"
