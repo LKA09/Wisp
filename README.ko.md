@@ -194,6 +194,7 @@ wisp
   │ /auto      execute workflow (auto-approve)                 │
   │ /claude    run Claude directly                             │
   │ /codex     run Codex directly                              │
+  │ /mode      show or set dry-run / execute mode              │
   │ /paste     enter multi-line paste mode                     │
   │ /help      show commands                                   │
   │ /exit      exit wisp                                       │
@@ -206,14 +207,27 @@ wisp
 
 | 입력 | 동작 |
 |---|---|
-| `<작업>` | Dry-run 미리보기 (파일 변경 없음) |
+| `<작업>` | 작업 실행 (`/mode` 설정을 따름 — 기본값: dry-run) |
 | `/run <작업>` | 전체 워크플로우 실행 (인터랙티브) |
 | `/auto <작업>` | 전체 워크플로우 실행 (자동 승인) |
 | `/claude <작업>` | Claude 단독 에이전트 실행 |
 | `/codex <작업>` | Codex 단독 에이전트 실행 |
+| `/mode [dry-run\|execute]` | 기본 실행 모드 확인 또는 설정 |
 | `/paste` | 여러 줄 붙여넣기 모드 |
 | `/help` | 도움말 |
 | `exit` / `quit` | 종료 |
+
+### 기본 실행 모드
+
+기본적으로 명령어 접두사(`/run`, `/auto` 등) 없이 입력한 작업은 dry-run 미리보기로 실행된다. `/mode`로 변경할 수 있다.
+
+```
+  › /mode execute    # 이제부터 작업 입력 시 에이전트가 실제로 실행됨
+  › /mode dry-run    # 다시 미리보기 전용으로 (기본값)
+  › /mode            # 현재 모드 확인
+```
+
+설정은 `.wisp/settings.toml`에 저장되어 세션이 끝나도 유지된다.
 
 ### 여러 줄 작업 입력
 
@@ -266,6 +280,9 @@ currency가 null인 엣지 케이스 처리 추가하고
 wisp init                                           # wisp.toml + .wisp/ 생성
 wisp doctor                                         # git, 에이전트, 설정 확인
 wisp update                                         # 최신 버전으로 업데이트
+wisp mode                                           # 현재 기본 모드 확인
+wisp mode dry-run                                   # 기본값을 dry-run 미리보기로 설정
+wisp mode execute                                   # 기본값을 에이전트 실행으로 설정
 
 # 워크플로우 (4단계: implement → patch → review → ship)
 wisp summon "<작업>"                                # dry-run 미리보기

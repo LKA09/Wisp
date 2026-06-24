@@ -194,6 +194,7 @@ wisp
   │ /auto      execute workflow (auto-approve)                 │
   │ /claude    run Claude directly                             │
   │ /codex     run Codex directly                              │
+  │ /mode      show or set dry-run / execute mode              │
   │ /paste     enter multi-line paste mode                     │
   │ /help      show commands                                   │
   │ /exit      exit wisp                                       │
@@ -206,14 +207,27 @@ Type `/` to open the live command picker. Completions filter as you type.
 
 | Input | Action |
 |---|---|
-| `<task>` | Dry-run preview (no files changed) |
+| `<task>` | Run task (respects `/mode` setting — dry-run by default) |
 | `/run <task>` | Execute full workflow interactively |
 | `/auto <task>` | Execute full workflow (auto-approve) |
 | `/claude <task>` | Run Claude as a single direct agent |
 | `/codex <task>` | Run Codex as a single direct agent |
+| `/mode [dry-run\|execute]` | Show or set the default execution mode |
 | `/paste` | Enter explicit multi-line paste mode |
 | `/help` | Show help |
 | `exit` / `quit` | Exit |
+
+### Default mode
+
+By default, bare task input (without `/run` or `/auto`) shows a dry-run preview. Use `/mode` to change this:
+
+```
+  › /mode execute    # bare tasks now invoke agents
+  › /mode dry-run    # back to preview-only (default)
+  › /mode            # show current mode
+```
+
+The setting is saved to `.wisp/settings.toml` and persists across sessions.
 
 ### Multi-line task input
 
@@ -265,6 +279,9 @@ also update the tests
 wisp init                                           # create wisp.toml + .wisp/
 wisp doctor                                         # check git, agents, config
 wisp update                                         # update wisp to the latest version
+wisp mode                                           # show current default mode
+wisp mode dry-run                                   # set default to dry-run preview
+wisp mode execute                                   # set default to execute agents
 
 # Workflow (4-step: implement → patch → review → ship)
 wisp summon "<task>"                                # dry-run preview

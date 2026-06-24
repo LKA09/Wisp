@@ -181,14 +181,27 @@ wisp
 
 | 输入 | 动作 |
 |---|---|
-| `<task>` | dry-run 预览（不修改文件） |
+| `<task>` | 执行任务（遵循 `/mode` 设置，默认为 dry-run） |
 | `/run <task>` | 交互式执行完整工作流 |
 | `/auto <task>` | 自动批准并执行完整工作流 |
 | `/claude <task>` | 仅运行 Claude |
 | `/codex <task>` | 仅运行 Codex |
+| `/mode [dry-run\|execute]` | 查看或设置默认执行模式 |
 | `/paste` | 进入显式多行粘贴模式 |
 | `/help` | 显示帮助 |
 | `exit` / `quit` | 退出 |
+
+### 默认模式
+
+默认情况下，不带命令前缀（`/run`、`/auto` 等）直接输入的任务会以 dry-run 预览方式运行。使用 `/mode` 可以修改此行为：
+
+```
+  › /mode execute    # 之后裸任务输入将直接调用代理
+  › /mode dry-run    # 恢复为仅预览模式（默认）
+  › /mode            # 查看当前模式
+```
+
+该设置保存在 `.wisp/settings.toml` 中，跨会话持久生效。
 
 ### 多行任务输入
 
@@ -240,6 +253,10 @@ also update the tests
 # 项目初始化
 wisp init                                           # 创建 wisp.toml + .wisp/
 wisp doctor                                         # 检查 git、代理、配置
+wisp update                                         # 更新 wisp 到最新版本
+wisp mode                                           # 查看当前默认模式
+wisp mode dry-run                                   # 设置默认为 dry-run 预览
+wisp mode execute                                   # 设置默认为执行代理
 
 # 工作流（4 步：implement -> patch -> review -> ship）
 wisp summon "<task>"                                # dry-run 预览
