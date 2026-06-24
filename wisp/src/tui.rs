@@ -1,8 +1,11 @@
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -18,11 +21,13 @@ use ratatui::{
 use std::path::PathBuf;
 
 const LAVENDER: Color = Color::Rgb(180, 150, 255);
-const DIM: Color = Color::Rgb(100, 100, 120);
+const DIM: Color = Color::Rgb(90, 90, 110);
 const GREEN: Color = Color::Rgb(80, 200, 120);
 const RED: Color = Color::Rgb(220, 80, 80);
-const WHITE: Color = Color::Rgb(220, 220, 230);
-const YELLOW: Color = Color::Rgb(220, 180, 80);
+const WHITE: Color = Color::Rgb(210, 210, 225);
+const YELLOW: Color = Color::Rgb(220, 180, 60);
+
+const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 const CMDS: &[(&str, &str)] = &[
     ("/run", "execute workflow interactively"),
@@ -54,8 +59,10 @@ struct App {
     branch: String,
     config_ok: bool,
     quit: bool,
-    /// Receiving end of workflow output channel. Some = workflow running.
     workflow_rx: Option<mpsc::Receiver<String>>,
+    workflow_started: Option<Instant>,
+    /// Track whether last pushed line was blank (for collapsing consecutive blanks).
+    last_was_blank: bool,
 }
 
 impl App {
@@ -81,10 +88,12 @@ impl App {
             config_ok,
             quit: false,
             workflow_rx: None,
+            workflow_started: None,
+            last_was_blank: false,
         };
         app.push("  Wisp  —  local coding agent orchestrator", LAVENDER);
         app.push("", WHITE);
-        app.push("  Type a task and press Enter. Use /help for commands.", DIM);
+        app.push("  Type a task and press Enter.  /help for commands.", DIM);
         app.push("", WHITE);
         app
     }
@@ -96,11 +105,9 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     fn push_sep(&mut self) {
-        self.push(
-            "  ──────────────────────────────────────────────────",
-            DIM,
-        );
+        self.push("", DIM);
     }
 
     fn refresh_status(&mut self) {
@@ -115,6 +122,44 @@ impl App {
 
     fn is_running(&self) -> bool {
         self.workflow_rx.is_some()
+    }
+
+    /// Push a line from the workflow channel, applying filters and colorization.
+    fn push_workflow_line(&mut self, line: String) {
+        // Skip heavy rule lines (━━━)
+        let t = line.trim();
+        if !t.is_empty() && t.chars().all(|c| c == '━' || c.is_whitespace()) {
+            return;
+        }
+        // Skip redundant workflow title
+        if t.contains("implement · patch · review · ship") {
+            return;
+        }
+        // Skip session path (too technical for TUI)
+        if t.starts_with("session") && t.contains(".wisp/sessions/") {
+            return;
+        }
+        if t.contains("session  ") && t.contains("wisp/sessions") {
+            return;
+        }
+        // Skip CLI-specific hints
+        if t.contains("use /run") && t.contains("execute for real") {
+            return;
+        }
+
+        // Collapse consecutive blank lines
+        let is_blank = t.is_empty();
+        if is_blank && self.last_was_blank {
+            return;
+        }
+        self.last_was_blank = is_blank;
+
+        let color = if is_blank {
+            WHITE
+        } else {
+            line_color(t)
+        };
+        self.push(line, color);
     }
 }
 
@@ -149,20 +194,20 @@ fn show_completions(app: &App) -> bool {
     !app.is_running() && app.input.starts_with('/') && !app.input.contains(' ')
 }
 
-/// Colorize a plain-text line received from the workflow channel.
-fn line_color(text: &str) -> Color {
-    let t = text.trim();
-    if t.contains("done ✓") || t.starts_with("✓") || t.contains("all checks passed") {
+fn line_color(t: &str) -> Color {
+    if t.contains("done ✓") || t.contains("all checks passed") || t.starts_with("✓") {
         GREEN
-    } else if t.contains("failed ✗") || t.starts_with("✗") || t.contains("Error") || t.contains("error:") {
+    } else if t.contains("failed ✗") || t.starts_with("✗") || t.starts_with("error") {
         RED
     } else if t.starts_with('+') && !t.starts_with("+++") {
         GREEN
     } else if t.starts_with('-') && !t.starts_with("---") {
         RED
-    } else if t.starts_with("  ✦") || t.starts_with("  ┌") || t.starts_with("  └") {
+    } else if t.starts_with("✦") || t.starts_with("┌") || t.starts_with("└") {
         LAVENDER
-    } else if t.is_empty() || t.starts_with("━") || t.starts_with("──") {
+    } else if t.starts_with('·') || t.starts_with("files") || t.starts_with("task")
+        || t.starts_with("branch") || t.starts_with("mode")
+    {
         DIM
     } else {
         WHITE
@@ -172,7 +217,7 @@ fn line_color(text: &str) -> Color {
 pub fn run() -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -180,7 +225,11 @@ pub fn run() -> anyhow::Result<()> {
     let result = event_loop(&mut terminal, &mut app);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -191,9 +240,7 @@ fn event_loop(
     app: &mut App,
 ) -> anyhow::Result<()> {
     loop {
-        // Drain any pending workflow output lines.
-        // Use a local buffer to avoid holding the borrow on app.workflow_rx
-        // while calling app.push (which needs &mut app).
+        // Drain workflow output.
         let mut new_lines: Vec<String> = Vec::new();
         let mut workflow_done = false;
         if let Some(rx) = app.workflow_rx.as_ref() {
@@ -209,38 +256,32 @@ fn event_loop(
             }
         }
         for line in new_lines {
-            let color = line_color(&line);
-            app.push(line, color);
+            app.push_workflow_line(line);
         }
         if workflow_done {
+            let elapsed = app
+                .workflow_started
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
             app.workflow_rx = None;
-            app.push_sep();
-            app.push("  Workflow finished.", DIM);
+            app.workflow_started = None;
+            app.last_was_blank = false;
+            app.push("", WHITE);
+            app.push(format!("  Done  ({elapsed}s)"), GREEN);
             app.push("", WHITE);
             app.refresh_status();
         }
 
         terminal.draw(|f| draw(f, app))?;
 
-        // While workflow runs: short poll so we keep redrawing for new lines.
-        // While idle: blocking read so keystrokes have zero latency.
+        // Short poll while workflow runs (to drain lines + animate spinner).
+        // Blocking read while idle (zero keystroke latency).
         if app.is_running() {
-            if event::poll(Duration::from_millis(20))? {
-                match event::read()? {
-                    Event::Key(k) if k.kind == KeyEventKind::Press => {
-                        on_key(k.code, k.modifiers, app)?;
-                    }
-                    _ => {}
-                }
+            if event::poll(Duration::from_millis(80))? {
+                handle_event(event::read()?, app)?;
             }
         } else {
-            match event::read()? {
-                Event::Key(k) if k.kind == KeyEventKind::Press => {
-                    on_key(k.code, k.modifiers, app)?;
-                }
-                Event::Resize(_, _) => {}
-                _ => {}
-            }
+            handle_event(event::read()?, app)?;
         }
 
         if app.quit {
@@ -250,11 +291,32 @@ fn event_loop(
     Ok(())
 }
 
-fn on_key(
-    code: KeyCode,
-    mods: KeyModifiers,
-    app: &mut App,
-) -> anyhow::Result<()> {
+fn handle_event(ev: Event, app: &mut App) -> anyhow::Result<()> {
+    match ev {
+        Event::Key(k) if k.kind == KeyEventKind::Press => {
+            on_key(k.code, k.modifiers, app)?;
+        }
+        Event::Mouse(me) => {
+            match me.kind {
+                MouseEventKind::ScrollUp => {
+                    app.auto_scroll = false;
+                    app.scroll = app.scroll.saturating_sub(3);
+                }
+                MouseEventKind::ScrollDown => {
+                    let max = app.lines.len().saturating_sub(1);
+                    app.scroll = (app.scroll + 3).min(max);
+                    app.auto_scroll = app.scroll >= max;
+                }
+                _ => {}
+            }
+        }
+        Event::Resize(_, _) => {}
+        _ => {}
+    }
+    Ok(())
+}
+
+fn on_key(code: KeyCode, mods: KeyModifiers, app: &mut App) -> anyhow::Result<()> {
     if app.focus == Focus::Sessions {
         match code {
             KeyCode::Esc | KeyCode::Tab => {
@@ -290,7 +352,7 @@ fn on_key(
         KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => {
             app.quit = true;
         }
-        KeyCode::Tab => {
+        KeyCode::Tab if !app.is_running() => {
             app.focus = Focus::Sessions;
             if !app.sessions.is_empty() && app.sessions_state.selected().is_none() {
                 app.sessions_state.select(Some(0));
@@ -314,17 +376,16 @@ fn on_key(
             app.scroll = (app.scroll + 1).min(max);
             app.auto_scroll = app.scroll >= max;
         }
-        KeyCode::Backspace if !app.is_running() => {
-            app.input.pop();
-        }
         KeyCode::Esc => {
-            if app.is_running() {
-                // Esc during workflow: scroll to bottom / re-enable auto-scroll
+            if app.is_running() || !app.auto_scroll {
                 app.auto_scroll = true;
                 app.scroll = app.lines.len().saturating_sub(1);
             } else {
                 app.input.clear();
             }
+        }
+        KeyCode::Backspace if !app.is_running() => {
+            app.input.pop();
         }
         KeyCode::Char(c) if !app.is_running() => {
             app.input.push(c);
@@ -342,10 +403,9 @@ fn on_key(
 }
 
 fn on_submit(input: String, app: &mut App) -> anyhow::Result<()> {
-    use crate::cli::InteractiveAction;
     use crate::agent::PermissionMode;
+    use crate::cli::InteractiveAction;
 
-    // Colon aliases
     if input == ":q" || input == ":quit" {
         app.quit = true;
         return Ok(());
@@ -357,47 +417,42 @@ fn on_submit(input: String, app: &mut App) -> anyhow::Result<()> {
         }
         InteractiveAction::Help => {
             app.push(format!("  > {input}"), LAVENDER);
-            app.push_sep();
+            app.push("", WHITE);
             for (cmd, desc) in CMDS {
                 app.push(format!("    {cmd:<16}  {desc}"), WHITE);
             }
-            app.push_sep();
+            app.push("", WHITE);
         }
-        InteractiveAction::PreviewCommands { query } => {
-            match query.as_str() {
-                "doctor" => {
-                    app.push(format!("  > {input}"), LAVENDER);
-                    spawn_workflow(app, move |tx| {
-                        crate::display::set_tui_sink(tx);
-                        crate::cli::doctor();
-                    });
-                }
-                "init" => {
-                    app.push(format!("  > {input}"), LAVENDER);
-                    spawn_workflow(app, move |tx| {
-                        crate::display::set_tui_sink(tx);
-                        crate::cli::init(false);
-                    });
-                }
-                q => {
-                    app.push(format!("  > {input}"), LAVENDER);
-                    let ms = completions_for(q);
-                    if ms.is_empty() {
-                        app.push(format!("  no matching command for /{q}"), DIM);
-                    } else {
-                        for (cmd, desc) in ms {
-                            app.push(format!("    {cmd:<16}  {desc}"), DIM);
-                        }
+        InteractiveAction::PreviewCommands { query } => match query.as_str() {
+            "doctor" => {
+                app.push(format!("  > {input}"), LAVENDER);
+                spawn_workflow(app, move |tx| {
+                    crate::display::set_tui_sink(tx);
+                    crate::cli::doctor();
+                });
+            }
+            "init" => {
+                app.push(format!("  > {input}"), LAVENDER);
+                spawn_workflow(app, move |tx| {
+                    crate::display::set_tui_sink(tx);
+                    crate::cli::init(false);
+                });
+            }
+            q => {
+                app.push(format!("  > {input}"), LAVENDER);
+                let ms = completions_for(q);
+                if ms.is_empty() {
+                    app.push(format!("  no matching command for /{q}"), DIM);
+                } else {
+                    for (cmd, desc) in ms {
+                        app.push(format!("    {cmd:<16}  {desc}"), DIM);
                     }
                 }
             }
-        }
+        },
         InteractiveAction::EnterPasteMode => {
             app.push(format!("  > {input}"), LAVENDER);
-            app.push(
-                "  Type your task directly in the input bar and press Enter.",
-                DIM,
-            );
+            app.push("  Type your task in the input bar and press Enter.", DIM);
         }
         InteractiveAction::ModeAction { arg } => {
             app.push(format!("  > {input}"), LAVENDER);
@@ -449,16 +504,15 @@ fn on_submit(input: String, app: &mut App) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Spawn a workflow thread. The closure receives a `Sender<String>` and should
-/// call `display::set_tui_sink(tx)` before doing any display output.
-/// When the closure returns the sender drops, signalling "done" to the event loop.
 fn spawn_workflow<F>(app: &mut App, f: F)
 where
     F: FnOnce(mpsc::Sender<String>) + Send + 'static,
 {
     let (tx, rx) = mpsc::channel::<String>();
     app.workflow_rx = Some(rx);
+    app.workflow_started = Some(Instant::now());
     app.auto_scroll = true;
+    app.last_was_blank = false;
     std::thread::spawn(move || f(tx));
 }
 
@@ -467,7 +521,11 @@ where
 fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
-    let sess_h = if app.sessions.is_empty() { 0u16 } else { 5u16 };
+    let sess_h = if !app.is_running() && !app.sessions.is_empty() {
+        5u16
+    } else {
+        0u16
+    };
     let show_comp = show_completions(app);
     let query = if show_comp {
         app.input.trim_start_matches('/').to_string()
@@ -480,7 +538,7 @@ fn draw(f: &mut Frame, app: &mut App) {
         0u16
     };
 
-    let header_h = 3u16;
+    let header_h = 2u16;
     let input_h = 3u16;
     let footer_h = 1u16;
     let fixed = header_h + sess_h + comp_h + input_h + footer_h;
@@ -500,7 +558,7 @@ fn draw(f: &mut Frame, app: &mut App) {
 
     draw_header(f, app, chunks[0]);
     draw_output(f, app, chunks[1]);
-    if !app.sessions.is_empty() {
+    if sess_h > 0 {
         draw_sessions(f, app, chunks[2]);
     }
     if show_comp {
@@ -513,28 +571,46 @@ fn draw(f: &mut Frame, app: &mut App) {
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let mode_str = if app.execute_agents { "execute" } else { "dry-run" };
     let mode_col = if app.execute_agents { GREEN } else { WHITE };
-    let cfg_str = if app.config_ok { "ok" } else { "missing" };
     let cfg_col = if app.config_ok { GREEN } else { RED };
+    let cfg_str = if app.config_ok { "ok" } else { "!" };
 
-    let status = if app.is_running() {
+    let right = if app.is_running() {
+        let elapsed = app
+            .workflow_started
+            .map(|t| t.elapsed().as_millis())
+            .unwrap_or(0);
+        let frame = SPINNER[(elapsed / 100) as usize % SPINNER.len()];
+        let secs = elapsed / 1000;
         vec![
-            Span::styled("  Wisp", Style::default().fg(LAVENDER).add_modifier(Modifier::BOLD)),
-            Span::styled("   branch: ", Style::default().fg(DIM)),
-            Span::styled(app.branch.as_str(), Style::default().fg(WHITE)),
-            Span::styled("   ", Style::default()),
-            Span::styled("running...", Style::default().fg(YELLOW).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" {frame} "), Style::default().fg(LAVENDER)),
+            Span::styled(
+                format!("running  {secs}s"),
+                Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
+            ),
         ]
     } else {
         vec![
-            Span::styled("  Wisp", Style::default().fg(LAVENDER).add_modifier(Modifier::BOLD)),
-            Span::styled("   branch: ", Style::default().fg(DIM)),
-            Span::styled(app.branch.as_str(), Style::default().fg(WHITE)),
-            Span::styled("   mode: ", Style::default().fg(DIM)),
-            Span::styled(mode_str, Style::default().fg(mode_col).add_modifier(Modifier::BOLD)),
-            Span::styled("   config: ", Style::default().fg(DIM)),
+            Span::styled("  mode: ", Style::default().fg(DIM)),
+            Span::styled(
+                mode_str,
+                Style::default().fg(mode_col).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("   cfg: ", Style::default().fg(DIM)),
             Span::styled(cfg_str, Style::default().fg(cfg_col)),
         ]
     };
+
+    let mut spans = vec![
+        Span::styled(
+            " Wisp ",
+            Style::default()
+                .fg(LAVENDER)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" │ ", Style::default().fg(DIM)),
+        Span::styled(app.branch.as_str(), Style::default().fg(WHITE)),
+    ];
+    spans.extend(right);
 
     let block = Block::default()
         .borders(Borders::BOTTOM)
@@ -542,8 +618,12 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
     f.render_widget(
-        Paragraph::new(Line::from(status)),
-        Rect { y: inner.y, height: 1, ..inner },
+        Paragraph::new(Line::from(spans)),
+        Rect {
+            y: inner.y,
+            height: 1,
+            ..inner
+        },
     );
 }
 
@@ -562,7 +642,9 @@ fn draw_output(f: &mut Frame, app: &App, area: Rect) {
 
     let lines: Vec<Line> = app.lines[start..end]
         .iter()
-        .map(|(text, color)| Line::from(Span::styled(text.as_str(), Style::default().fg(*color))))
+        .map(|(text, color)| {
+            Line::from(Span::styled(text.as_str(), Style::default().fg(*color)))
+        })
         .collect();
 
     f.render_widget(Paragraph::new(lines), area);
@@ -624,54 +706,66 @@ fn draw_completions(f: &mut Frame, query: &str, area: Rect) {
 }
 
 fn draw_input(f: &mut Frame, app: &App, area: Rect) {
-    let (border_col, prompt_text, cursor) = if app.is_running() {
-        (DIM, "  waiting for workflow...", "")
-    } else if app.focus == Focus::Input {
-        (LAVENDER, "  > ", "_")
+    let (border_col, line) = if app.is_running() {
+        (
+            DIM,
+            Line::from(Span::styled(
+                "  waiting for workflow...",
+                Style::default().fg(DIM),
+            )),
+        )
     } else {
-        (DIM, "  > ", "_")
+        let focused = app.focus == Focus::Input;
+        (
+            if focused { LAVENDER } else { DIM },
+            Line::from(vec![
+                Span::styled("  > ", Style::default().fg(LAVENDER)),
+                Span::styled(app.input.as_str(), Style::default().fg(WHITE)),
+                Span::styled(
+                    "_",
+                    Style::default()
+                        .fg(LAVENDER)
+                        .add_modifier(Modifier::SLOW_BLINK),
+                ),
+            ]),
+        )
     };
 
-    let line = if app.is_running() {
-        Line::from(Span::styled(prompt_text, Style::default().fg(DIM)))
-    } else {
-        Line::from(vec![
-            Span::styled(prompt_text, Style::default().fg(LAVENDER)),
-            Span::styled(app.input.as_str(), Style::default().fg(WHITE)),
-            Span::styled(cursor, Style::default().fg(LAVENDER).add_modifier(Modifier::SLOW_BLINK)),
-        ])
-    };
-
-    let para = Paragraph::new(line).block(
-        Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(border_col)),
+    f.render_widget(
+        Paragraph::new(line).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(border_col)),
+        ),
+        area,
     );
-
-    f.render_widget(para, area);
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let line = if app.is_running() {
-        Line::from(vec![
-            Span::styled("  Esc", Style::default().fg(LAVENDER)),
-            Span::styled(": scroll to bottom  ", Style::default().fg(DIM)),
-            Span::styled("PgUp/↑↓", Style::default().fg(LAVENDER)),
-            Span::styled(": scroll  ", Style::default().fg(DIM)),
-            Span::styled("Ctrl+C", Style::default().fg(LAVENDER)),
-            Span::styled(": quit", Style::default().fg(DIM)),
-        ])
-    } else {
-        Line::from(vec![
-            Span::styled("  Tab", Style::default().fg(LAVENDER)),
-            Span::styled(": sessions  ", Style::default().fg(DIM)),
-            Span::styled("PgUp/PgDn", Style::default().fg(LAVENDER)),
-            Span::styled(": scroll  ", Style::default().fg(DIM)),
+    let spans: Vec<Span> = if app.is_running() {
+        vec![
+            Span::styled("  scroll: ", Style::default().fg(DIM)),
+            Span::styled("mouse wheel", Style::default().fg(LAVENDER)),
+            Span::styled(" / ", Style::default().fg(DIM)),
+            Span::styled("PgUp PgDn ↑↓", Style::default().fg(LAVENDER)),
+            Span::styled("   bottom: ", Style::default().fg(DIM)),
             Span::styled("Esc", Style::default().fg(LAVENDER)),
-            Span::styled(": clear  ", Style::default().fg(DIM)),
+            Span::styled("   quit: ", Style::default().fg(DIM)),
             Span::styled("Ctrl+C", Style::default().fg(LAVENDER)),
-            Span::styled(": quit", Style::default().fg(DIM)),
-        ])
+        ]
+    } else {
+        vec![
+            Span::styled("  scroll: ", Style::default().fg(DIM)),
+            Span::styled("mouse wheel", Style::default().fg(LAVENDER)),
+            Span::styled(" / ", Style::default().fg(DIM)),
+            Span::styled("PgUp PgDn", Style::default().fg(LAVENDER)),
+            Span::styled("   sessions: ", Style::default().fg(DIM)),
+            Span::styled("Tab", Style::default().fg(LAVENDER)),
+            Span::styled("   clear: ", Style::default().fg(DIM)),
+            Span::styled("Esc", Style::default().fg(LAVENDER)),
+            Span::styled("   quit: ", Style::default().fg(DIM)),
+            Span::styled("Ctrl+C", Style::default().fg(LAVENDER)),
+        ]
     };
-    f.render_widget(Paragraph::new(line), area);
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }

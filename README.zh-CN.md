@@ -167,36 +167,65 @@ npm link
 
 ---
 
-## 交互模式
+## 交互式 TUI
 
-不带参数运行 `wisp` 会打开交互式 REPL：
+不带参数运行 `wisp` 会打开全屏 TUI：
 
 ```sh
 wisp
 ```
 
-输入 `/` 可以打开实时命令选择器，输入时会即时过滤补全结果。
+TUI 分为两个面板：
+
+```
+┌─ Sessions ──────┬─ Output ────────────────────────────────────────┐
+│ 20260624-143022 │                                                   │
+│ 20260623-091011 │   task    add rate limiting to API endpoints      │
+│                 │   branch  main                                    │
+│                 │   mode    execute                                 │
+│                 │                                                   │
+│                 │   ┌─ [1/4]  Claude  —  implement                 │
+│                 │     正在编写限流中间件...                           │
+│                 │     已更新 src/middleware/rateLimit.ts            │
+│                 │                                                   │
+│                 │   └─  Claude  done ✓                             │
+│                 │                                                   │
+├─────────────────┴─────────────────────────────────────────────────┤
+│  › add rate limiting to the API endpoints /run          [execute]  │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+**工作流在后台运行。** TUI 始终保持在屏幕上 — 输出实时流式显示，同时动画 spinner 显示已用时间。鼠标滚轮可滚动输出面板。
+
+### 快捷键
+
+| 按键 | 动作 |
+|---|---|
+| `Enter` | 提交输入（默认 dry-run） |
+| `Backspace` / `←` `→` | 编辑输入 |
+| `鼠标滚轮` | 滚动输出面板 |
+| `Esc` | 重新启用自动滚动到底部 |
+| `Ctrl+C` | 退出 |
 
 ### 命令
 
 | 输入 | 动作 |
 |---|---|
 | `<task>` | dry-run 预览（不修改文件） |
-| `/run <task>` | 交互式执行完整工作流 |
+| `/run <task>` | 执行完整工作流 |
 | `/auto <task>` | 自动批准并执行完整工作流 |
 | `/claude <task>` | 仅运行 Claude |
 | `/codex <task>` | 仅运行 Codex |
-| `/paste` | 进入显式多行粘贴模式 |
+| `/mode dry-run` | 切换到 dry-run 模式 |
+| `/mode execute` | 切换到 execute 模式 |
 | `/help` | 显示帮助 |
-| `exit` / `quit` | 退出 |
+| `/exit` | 退出 |
 
 ### 多行任务输入
 
-**自动检测（行模式）**
+**自动检测：** 粘贴多行任务，并在最后一行输入命令：
 
-粘贴多行任务，并在最后一行输入命令：
-
-```text
+```
 fix the payment module
 handle the edge case where currency is null
 also update the tests
@@ -205,15 +234,15 @@ also update the tests
 
 | 最后一行 | 效果 |
 |---|---|
-| `/run` | 交互式执行完整工作流 |
+| `/run` | 执行完整工作流 |
 | `/auto` | 自动批准并执行完整工作流 |
 | `/claude` | 仅运行 Claude |
 | `/codex` | 仅运行 Codex |
 | *(无)* | dry-run 预览 |
 
-**显式粘贴模式（适用于 Windows PowerShell 原始控制台）**
+**显式粘贴模式**（适用于所有终端，包括 Windows PowerShell）：
 
-```text
+```
   /paste
   [paste mode - type or paste content, end with /end on its own line]
 
@@ -387,7 +416,7 @@ cargo test
 ```
 
 - 代码位于 `wisp/src/`
-- 保持轻量依赖，只使用 `clap`、`serde`、`toml`、`anyhow`、`chrono`
+- 保持轻量依赖，只使用 `clap`、`serde`、`toml`、`anyhow`、`chrono`、`ratatui`、`crossterm`
 - PR 请提交到 `develop-ai` 分支
 
 ---

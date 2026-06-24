@@ -171,55 +171,63 @@ npm link
 
 ---
 
-## 인터랙티브 모드
+## 인터랙티브 TUI
 
-인수 없이 `wisp`를 실행하면 인터랙티브 REPL이 열린다.
+인수 없이 `wisp`를 실행하면 전체 화면 TUI가 열린다.
 
-```
+```sh
 wisp
 ```
 
+TUI는 두 개의 패널로 나뉜다.
+
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ✦  Wisp  —  local coding agent
-     Claude implements · Codex ships · you stay in control
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  Type a task and press Enter — default is dry-run preview.
-  Default is dry-run.  Use /run to execute  ·  exit to quit.
-
-  › /
-  ╭────────────────────────────────────────────────────────────╮
-  │ /run       execute workflow interactively                  │
-  │ /auto      execute workflow (auto-approve)                 │
-  │ /claude    run Claude directly                             │
-  │ /codex     run Codex directly                              │
-  │ /paste     enter multi-line paste mode                     │
-  │ /help      show commands                                   │
-  │ /exit      exit wisp                                       │
-  ╰────────────────────────────────────────────────────────────╯
+┌─ Sessions ──────┬─ Output ────────────────────────────────────────┐
+│ 20260624-143022 │                                                   │
+│ 20260623-091011 │   task    API 엔드포인트에 rate limiting 추가      │
+│                 │   branch  main                                    │
+│                 │   mode    execute                                 │
+│                 │                                                   │
+│                 │   ┌─ [1/4]  Claude  —  implement                 │
+│                 │     rate limiter 미들웨어 작성 중...               │
+│                 │     src/middleware/rateLimit.ts 수정              │
+│                 │                                                   │
+│                 │   └─  Claude  done ✓                             │
+│                 │                                                   │
+├─────────────────┴─────────────────────────────────────────────────┤
+│  › API 엔드포인트에 rate limiting 추가 /run             [execute]  │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-`/`를 입력하면 명령어 선택 창이 열린다. 타이핑할수록 실시간으로 필터링된다.
+**워크플로우는 백그라운드에서 실행된다.** TUI는 화면을 벗어나지 않고 — 출력이 실시간으로 스트리밍되며 애니메이션 스피너가 경과 시간을 표시한다. 마우스 휠로 출력 패널을 스크롤할 수 있다.
+
+### 단축키
+
+| 키 | 동작 |
+|---|---|
+| `Enter` | 입력 제출 (기본값: dry-run) |
+| `Backspace` / `←` `→` | 입력 편집 |
+| `마우스 휠` | 출력 패널 스크롤 |
+| `Esc` | 자동 스크롤(맨 아래 따라가기) 재활성화 |
+| `Ctrl+C` | 종료 |
 
 ### 명령어
 
 | 입력 | 동작 |
 |---|---|
 | `<작업>` | Dry-run 미리보기 (파일 변경 없음) |
-| `/run <작업>` | 전체 워크플로우 실행 (인터랙티브) |
+| `/run <작업>` | 전체 워크플로우 실행 |
 | `/auto <작업>` | 전체 워크플로우 실행 (자동 승인) |
 | `/claude <작업>` | Claude 단독 에이전트 실행 |
 | `/codex <작업>` | Codex 단독 에이전트 실행 |
-| `/paste` | 여러 줄 붙여넣기 모드 |
+| `/mode dry-run` | dry-run 모드로 전환 |
+| `/mode execute` | execute 모드로 전환 |
 | `/help` | 도움말 |
-| `exit` / `quit` | 종료 |
+| `/exit` | 종료 |
 
 ### 여러 줄 작업 입력
 
-**자동 감지 (라인 모드)**
-
-여러 줄로 된 작업을 붙여넣고 마지막 줄에 명령어를 입력하면 된다.
+**자동 감지:** 여러 줄로 된 작업을 붙여넣고 마지막 줄에 명령어를 입력하면 된다.
 
 ```
 결제 모듈 리팩토링해줘
@@ -230,13 +238,13 @@ currency가 null인 엣지 케이스 처리 추가하고
 
 | 마지막 줄 | 동작 |
 |---|---|
-| `/run` | 전체 워크플로우 실행 (인터랙티브) |
+| `/run` | 전체 워크플로우 실행 |
 | `/auto` | 전체 워크플로우 실행 (자동 승인) |
 | `/claude` | Claude 단독 에이전트 실행 |
 | `/codex` | Codex 단독 에이전트 실행 |
 | *(없음)* | Dry-run 미리보기 |
 
-**명시적 붙여넣기 모드 (Windows PowerShell 포함 모든 터미널에서 동작)**
+**명시적 붙여넣기 모드** (Windows PowerShell 포함 모든 터미널에서 안정적으로 동작):
 
 ```
   › /paste
@@ -256,7 +264,6 @@ currency가 null인 엣지 케이스 처리 추가하고
 2. 내용을 붙여넣거나 입력
 3. 독립된 줄에 `/end` 입력
 4. 명령어 입력 또는 Enter (dry-run)
-
 ---
 
 ## CLI 레퍼런스
@@ -412,7 +419,7 @@ cargo test
 ```
 
 - 코드는 `wisp/src/`에 있다
-- 무거운 의존성 없음 — `clap`, `serde`, `toml`, `anyhow`, `chrono`만 사용
+- 무거운 의존성 없음 — `clap`, `serde`, `toml`, `anyhow`, `chrono`, `ratatui`, `crossterm`만 사용
 - PR은 `develop-ai` 브랜치로
 
 ---

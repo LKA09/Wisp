@@ -171,7 +171,7 @@ npm link
 
 ---
 
-## Interactive Mode
+## Interactive TUI
 
 Run `wisp` with no arguments to open the interactive REPL.
 
