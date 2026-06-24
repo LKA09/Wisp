@@ -9,8 +9,8 @@ mod instructions;
 mod language;
 mod policy;
 mod session;
-mod update;
 mod settings;
+mod update;
 mod workflow;
 
 use crate::agent::PermissionMode;

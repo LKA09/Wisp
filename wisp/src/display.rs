@@ -203,7 +203,9 @@ pub fn interactive_header() {
     println!("     {GRAY}Claude implements · Codex ships · you stay in control{RESET}");
     println!("{rule}");
     println!();
-    println!("  Type a task and press Enter.  Use {WHITE}/mode{RESET} to set dry-run or execute default.");
+    println!(
+        "  Type a task and press Enter.  Use {WHITE}/mode{RESET} to set dry-run or execute default."
+    );
     println!(
         "  {GRAY}Use {WHITE}/run{GRAY} to execute  ·  {WHITE}/mode dry-run{GRAY} or {WHITE}/mode execute{GRAY}  ·  {WHITE}exit{GRAY} to quit.{RESET}"
     );
@@ -272,7 +274,10 @@ pub fn interactive_help() {
 
 pub fn interactive_command_preview(query: &str) {
     let all: &[(&str, &str)] = &[
-        ("run", "/run <task>           —  execute workflow interactively"),
+        (
+            "run",
+            "/run <task>           —  execute workflow interactively",
+        ),
         (
             "auto",
             "/auto <task>          —  execute workflow (auto-approve)",
@@ -546,17 +551,13 @@ pub fn mode_status(execute_agents: bool) {
             "  {ACCENT}✦{RESET}  mode: {GREEN}{BOLD}execute{RESET}  \
              {GRAY}— bare tasks invoke agents{RESET}"
         );
-        println!(
-            "  {GRAY}Use {WHITE}/mode dry-run{GRAY} to switch to preview-only.{RESET}"
-        );
+        println!("  {GRAY}Use {WHITE}/mode dry-run{GRAY} to switch to preview-only.{RESET}");
     } else {
         println!(
             "  {ACCENT}✦{RESET}  mode: {WHITE}{BOLD}dry-run{RESET}  \
              {GRAY}— bare tasks show a preview only (default){RESET}"
         );
-        println!(
-            "  {GRAY}Use {WHITE}/mode execute{GRAY} to invoke agents for bare tasks.{RESET}"
-        );
+        println!("  {GRAY}Use {WHITE}/mode execute{GRAY} to invoke agents for bare tasks.{RESET}");
     }
     println!();
 }
