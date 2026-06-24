@@ -1,6 +1,6 @@
 {
   "name": "@lka09/wisp",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "A local personal coding agent for Claude and Codex CLI.",
   "bin": {
     "wisp": "bin/wisp.js"
