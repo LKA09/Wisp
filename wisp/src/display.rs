@@ -91,13 +91,6 @@ fn heavy_rule() -> String {
     format!("{GRAY}{}{RESET}", "━".repeat(term_width()))
 }
 
-/// Clear the screen and redraw the interactive header (called on terminal resize).
-pub fn on_resize() {
-    print!("\x1b[2J\x1b[H");
-    let _ = std::io::stdout().flush();
-    interactive_header();
-}
-
 // ─── Live command completions ─────────────────────────────────────────────────
 
 const COMPLETIONS: &[(&str, &str)] = &[
@@ -123,61 +116,6 @@ pub fn completions_for(input: &str) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
-/// Redraw `  › {input}` plus a live completion box when the input starts with `/`.
-/// Returns the number of lines occupied by the box (0 if no box).
-/// Leaves the cursor at the end of the input on the prompt line.
-pub fn redraw_prompt_with_completions(input: &str) -> usize {
-    use std::io::Write;
-
-    // Clear from start of current line to end of screen, then reprint prompt.
-    print!("\r\x1b[J");
-    print!("  {ACCENT}›{RESET} {input}");
-
-    // Show box only while completing a slash-command (no space yet).
-    if !input.starts_with('/') || input.contains(' ') {
-        let _ = std::io::stdout().flush();
-        return 0;
-    }
-
-    let matches = completions_for(input);
-
-    // Inner content width (between the │ borders).
-    let box_inner = (term_width().saturating_sub(4)).min(56);
-    let cmd_col = 18usize;
-    let desc_col = box_inner.saturating_sub(cmd_col + 3); // 1 sp + cmd + 2 sp = cmd+3
-
-    let h_line = "─".repeat(box_inner + 2); // +2 for the spaces inside borders
-    let top = format!("╭{h_line}╮");
-    let bot = format!("╰{h_line}╯");
-
-    if matches.is_empty() {
-        let msg = format!(" {:<box_inner$} ", "no matching command");
-        print!("\n  {GRAY}{top}\n  │{msg}│\n  {bot}{RESET}");
-        let extra = 3usize;
-        print!("\x1b[{extra}A\r\x1b[{}C", 4 + input.len());
-        let _ = std::io::stdout().flush();
-        return extra;
-    }
-
-    print!("\n  {GRAY}{top}{RESET}");
-    for (cmd, desc) in &matches {
-        let desc_trimmed = if desc.len() > desc_col {
-            &desc[..desc_col]
-        } else {
-            desc
-        };
-        let row = format!(" {cmd:<cmd_col$}  {desc_trimmed:<desc_col$} ");
-        print!("\n  {GRAY}│{RESET}{WHITE}{row}{GRAY}│{RESET}");
-    }
-    print!("\n  {GRAY}{bot}{RESET}");
-
-    let extra = matches.len() + 2;
-    // Move cursor back to input line, then to position after the typed text.
-    print!("\x1b[{extra}A\r\x1b[{}C", 4 + input.len());
-    let _ = std::io::stdout().flush();
-    extra
-}
-
 // ─── Agent display names ──────────────────────────────────────────────────────
 
 pub fn agent_display(name: &str) -> String {
@@ -196,22 +134,6 @@ pub fn agent_display(name: &str) -> String {
 
 // ─── Interactive UI ───────────────────────────────────────────────────────────
 
-pub fn interactive_header() {
-    let rule = heavy_rule();
-    println!("{rule}");
-    println!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp{RESET}  {GRAY}—{RESET}  local coding agent");
-    println!("     {GRAY}Claude implements · Codex ships · you stay in control{RESET}");
-    println!("{rule}");
-    println!();
-    println!(
-        "  Type a task and press Enter.  Use {WHITE}/mode{RESET} to set dry-run or execute default."
-    );
-    println!(
-        "  {GRAY}Use {WHITE}/run{GRAY} to execute  ·  {WHITE}/mode dry-run{GRAY} or {WHITE}/mode execute{GRAY}  ·  {WHITE}exit{GRAY} to quit.{RESET}"
-    );
-    println!();
-}
-
 pub fn no_config_hint() {
     let rule = heavy_rule();
     println!("{rule}");
@@ -219,95 +141,6 @@ pub fn no_config_hint() {
     println!("{rule}");
     println!();
     println!("  Run {BOLD}wisp init{RESET} to get started.");
-    println!();
-}
-
-pub fn interactive_prompt() {
-    print!("  {ACCENT}›{RESET} ");
-}
-
-pub fn goodbye() {
-    println!();
-    println!("  {GRAY}✦  bye —{RESET}");
-    println!();
-}
-
-pub fn interactive_help() {
-    let rule = heavy_rule();
-    println!("{rule}");
-    println!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Commands{RESET}");
-    println!("{rule}");
-    println!();
-
-    let cmds: &[(&str, &str)] = &[
-        ("<task>", "run task (respects /mode setting)"),
-        ("/run <task>", "execute workflow interactively"),
-        ("/auto <task>", "execute workflow (auto-approve)"),
-        ("/claude <task>", "run Claude directly"),
-        ("/codex <task>", "run Codex directly"),
-        ("/mode [dry-run|execute]", "show or set default mode"),
-        ("/paste", "enter explicit multi-line paste mode"),
-        ("/help", "show this help"),
-        ("exit / quit", "exit wisp"),
-    ];
-
-    for (cmd, desc) in cmds {
-        println!("  {WHITE}{cmd:<26}{RESET}  {GRAY}{desc}{RESET}");
-    }
-
-    println!();
-    println!("  {GRAY}Multi-line paste (fallback / lines mode):{RESET}");
-    println!("  {GRAY}  Paste text, then end the last line with a trailing command:{RESET}");
-    println!("  {WHITE}    <multi-line task>{RESET}");
-    println!(
-        "  {WHITE}    /run{RESET}       {GRAY}or{RESET}  {WHITE}/auto{RESET}  {GRAY}or{RESET}  {WHITE}/claude{RESET}  {GRAY}or{RESET}  {WHITE}/codex{RESET}"
-    );
-    println!("  {GRAY}  No trailing command → dry-run preview.{RESET}");
-    println!();
-    println!("  {GRAY}Explicit paste mode (works in raw console):{RESET}");
-    println!("  {WHITE}    /paste{RESET}");
-    println!("  {WHITE}    <paste content>{RESET}");
-    println!("  {WHITE}    /end{RESET}");
-    println!("  {WHITE}    /run{RESET}  {GRAY}(or Enter for dry-run){RESET}");
-    println!();
-}
-
-pub fn interactive_command_preview(query: &str) {
-    let all: &[(&str, &str)] = &[
-        (
-            "run",
-            "/run <task>           —  execute workflow interactively",
-        ),
-        (
-            "auto",
-            "/auto <task>          —  execute workflow (auto-approve)",
-        ),
-        ("claude", "/claude <task>        —  run Claude directly"),
-        ("codex", "/codex <task>         —  run Codex directly"),
-        ("mode", "/mode [dry-run|execute] —  set default mode"),
-        ("paste", "/paste                —  multi-line paste mode"),
-        ("help", "/help                 —  show all commands"),
-        ("exit", "/exit                 —  exit wisp"),
-        ("quit", "/quit                 —  exit wisp"),
-    ];
-
-    let matches: Vec<&str> = if query.is_empty() {
-        all.iter().map(|(_, desc)| *desc).collect()
-    } else {
-        all.iter()
-            .filter(|(key, _)| key.starts_with(query))
-            .map(|(_, desc)| *desc)
-            .collect()
-    };
-
-    println!();
-    if matches.is_empty() {
-        println!("  {GRAY}no matching command for /{query}{RESET}");
-    } else {
-        for desc in &matches {
-            println!("  {GRAY}{desc}{RESET}");
-        }
-    }
     println!();
 }
 
@@ -472,27 +305,6 @@ pub fn doctor_summary(env_ok: bool, agents_ok: bool) {
         println!("  {GRAY}Run {WHITE}wisp init{GRAY} and install missing tools.{RESET}");
     }
     println!();
-}
-
-// ─── Paste mode ───────────────────────────────────────────────────────────────
-
-pub fn paste_mode_enter() {
-    println!();
-    println!(
-        "  {GRAY}[paste mode — type or paste content, finish with {WHITE}/end{GRAY} on its own line]{RESET}"
-    );
-    println!();
-}
-
-pub fn paste_mode_captured(char_count: usize, line_count: usize) {
-    println!();
-    println!("  {GRAY}[pasted: {char_count} chars, {line_count} lines]{RESET}");
-}
-
-pub fn paste_mode_command_prompt() {
-    print!(
-        "  {ACCENT}command{RESET}  {GRAY}(/run  /auto  /claude  /codex  or Enter for dry-run){RESET}\n  {ACCENT}›{RESET} "
-    );
 }
 
 // ─── Thinking spinner ─────────────────────────────────────────────────────────

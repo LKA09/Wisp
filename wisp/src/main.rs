@@ -4,12 +4,12 @@ mod config;
 mod display;
 mod error;
 mod git;
-mod input;
 mod instructions;
 mod language;
 mod policy;
 mod session;
 mod settings;
+mod tui;
 mod update;
 mod workflow;
 
