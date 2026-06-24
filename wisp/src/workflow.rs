@@ -26,7 +26,7 @@ fn format_stdout_line(line: &str) -> String {
 }
 
 fn format_stderr_line(line: &str) -> String {
-    format!("\x1b[90m[stderr]\x1b[0m {}", colorize_diff_line(line))
+    colorize_diff_line(line)
 }
 
 fn colorize_diff_line(line: &str) -> String {
@@ -639,7 +639,7 @@ fn run_agent_with_streaming(
                 if stderr_lines.len() > MAX_STDERR_DISPLAY_LINES {
                     let omitted = stderr_lines.len() - MAX_STDERR_DISPLAY_LINES;
                     display::agent_line(&format!(
-                        "\x1b[90m[stderr] ... {omitted} more line(s) omitted\x1b[0m"
+                        "\x1b[90m... {omitted} more line(s) omitted\x1b[0m"
                     ));
                 }
             }
@@ -744,6 +744,16 @@ fn handle_policy_violations(
             ApprovalDecision::Allow => {}
             ApprovalDecision::Deny => return Ok(false),
             ApprovalDecision::Ask => {
+                if display::is_tui_active() {
+                    // Cannot prompt interactively inside TUI; deny for safety.
+                    display::wisp_note(&format!(
+                        "Policy requires approval for {} ({}) in TUI mode — denied: {}",
+                        display::agent_display(agent),
+                        role,
+                        violation.message
+                    ));
+                    return Ok(false);
+                }
                 println!();
                 println!(
                     "  Approval required for {} ({}): {}",
