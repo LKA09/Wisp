@@ -241,7 +241,9 @@ pub fn finish(session_path: &str, is_dry_run: bool) {
     }
     emit(&rule);
     emit("");
-    emit(&format!("  {GRAY}session  {RESET}{DIM}{session_path}{RESET}"));
+    emit(&format!(
+        "  {GRAY}session  {RESET}{DIM}{session_path}{RESET}"
+    ));
     if is_dry_run {
         emit(&format!(
             "  {GRAY}         use {WHITE}/run <task>{GRAY} to execute for real{RESET}"
@@ -255,7 +257,9 @@ pub fn finish(session_path: &str, is_dry_run: bool) {
 pub fn init_header() {
     let rule = heavy_rule();
     emit(&rule);
-    emit(&format!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp Init{RESET}"));
+    emit(&format!(
+        "  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp Init{RESET}"
+    ));
     emit(&rule);
     emit("");
 }
@@ -300,7 +304,9 @@ pub fn init_error(path: &str, err: &dyn std::fmt::Display) {
 pub fn doctor_header() {
     let rule = heavy_rule();
     emit(&rule);
-    emit(&format!("  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp Doctor{RESET}"));
+    emit(&format!(
+        "  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp Doctor{RESET}"
+    ));
     emit(&rule);
     emit("");
 }

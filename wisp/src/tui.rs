@@ -154,11 +154,7 @@ impl App {
         }
         self.last_was_blank = is_blank;
 
-        let color = if is_blank {
-            WHITE
-        } else {
-            line_color(t)
-        };
+        let color = if is_blank { WHITE } else { line_color(t) };
         self.push(line, color);
     }
 }
@@ -205,8 +201,11 @@ fn line_color(t: &str) -> Color {
         RED
     } else if t.starts_with("✦") || t.starts_with("┌") || t.starts_with("└") {
         LAVENDER
-    } else if t.starts_with('·') || t.starts_with("files") || t.starts_with("task")
-        || t.starts_with("branch") || t.starts_with("mode")
+    } else if t.starts_with('·')
+        || t.starts_with("files")
+        || t.starts_with("task")
+        || t.starts_with("branch")
+        || t.starts_with("mode")
     {
         DIM
     } else {
@@ -296,20 +295,18 @@ fn handle_event(ev: Event, app: &mut App) -> anyhow::Result<()> {
         Event::Key(k) if k.kind == KeyEventKind::Press => {
             on_key(k.code, k.modifiers, app)?;
         }
-        Event::Mouse(me) => {
-            match me.kind {
-                MouseEventKind::ScrollUp => {
-                    app.auto_scroll = false;
-                    app.scroll = app.scroll.saturating_sub(3);
-                }
-                MouseEventKind::ScrollDown => {
-                    let max = app.lines.len().saturating_sub(1);
-                    app.scroll = (app.scroll + 3).min(max);
-                    app.auto_scroll = app.scroll >= max;
-                }
-                _ => {}
+        Event::Mouse(me) => match me.kind {
+            MouseEventKind::ScrollUp => {
+                app.auto_scroll = false;
+                app.scroll = app.scroll.saturating_sub(3);
             }
-        }
+            MouseEventKind::ScrollDown => {
+                let max = app.lines.len().saturating_sub(1);
+                app.scroll = (app.scroll + 3).min(max);
+                app.auto_scroll = app.scroll >= max;
+            }
+            _ => {}
+        },
         Event::Resize(_, _) => {}
         _ => {}
     }
@@ -569,7 +566,11 @@ fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
-    let mode_str = if app.execute_agents { "execute" } else { "dry-run" };
+    let mode_str = if app.execute_agents {
+        "execute"
+    } else {
+        "dry-run"
+    };
     let mode_col = if app.execute_agents { GREEN } else { WHITE };
     let cfg_col = if app.config_ok { GREEN } else { RED };
     let cfg_str = if app.config_ok { "ok" } else { "!" };
@@ -603,9 +604,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let mut spans = vec![
         Span::styled(
             " Wisp ",
-            Style::default()
-                .fg(LAVENDER)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(LAVENDER).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" │ ", Style::default().fg(DIM)),
         Span::styled(app.branch.as_str(), Style::default().fg(WHITE)),
@@ -642,9 +641,7 @@ fn draw_output(f: &mut Frame, app: &App, area: Rect) {
 
     let lines: Vec<Line> = app.lines[start..end]
         .iter()
-        .map(|(text, color)| {
-            Line::from(Span::styled(text.as_str(), Style::default().fg(*color)))
-        })
+        .map(|(text, color)| Line::from(Span::styled(text.as_str(), Style::default().fg(*color))))
         .collect();
 
     f.render_widget(Paragraph::new(lines), area);
