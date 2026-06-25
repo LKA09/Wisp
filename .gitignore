@@ -6,6 +6,7 @@ npm/dist/
 
 # Wisp runtime data (user-specific, created by `wisp init`)
 **/.wisp/sessions/
+**/.wisp/settings.toml
 wisp.toml
 
 # OS
@@ -19,3 +20,6 @@ Thumbs.db
 
 .claude
 .npm-cache/
+
+# QA-issues-reports
+Wisp-QA-issues.txt

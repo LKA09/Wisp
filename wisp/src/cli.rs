@@ -226,6 +226,13 @@ fn parse_execute_command(task: &str, permission_mode: PermissionMode) -> Interac
 }
 
 pub fn interactive() {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "wisp: interactive TUI requires a terminal. Use `wisp summon \"<task>\"` for non-interactive use."
+        );
+        std::process::exit(1);
+    }
     if let Err(e) = crate::tui::run() {
         eprintln!("Error starting TUI: {e}");
     }

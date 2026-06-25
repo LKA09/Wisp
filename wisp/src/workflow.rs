@@ -105,6 +105,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
     // ── Step 1: implement (always once) ───────────────────────────────────────
     step += 1;
     let impl_prompt = build_implement_prompt(&normalized_task_en, &args.task, &instructions_text);
+    let impl_display_role = display_role_label("implement", args.execute_agents);
     run_workflow_step(
         &config,
         &session,
@@ -112,6 +113,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         &cwd,
         config.workflow.implementer.as_str(),
         "implement",
+        &impl_display_role,
         step,
         total_steps,
         "prompts/implementer.en.md",
@@ -141,7 +143,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         display::wisp_note(&handoff_note(
             handoff_from,
             config.workflow.patcher.as_str(),
-            "patch",
+            &display_role_label("patch", args.execute_agents),
             &args.lang,
         ));
 
@@ -153,6 +155,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
             "patch".to_string()
         };
         let patch_prompt = build_patch_prompt(&normalized_task_en, &args.task, &instructions_text);
+        let patch_display_role = display_role_label(&patch_role, args.execute_agents);
         run_workflow_step(
             &config,
             &session,
@@ -160,6 +163,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
             &cwd,
             config.workflow.patcher.as_str(),
             &patch_role,
+            &patch_display_role,
             step,
             total_steps,
             &format!("prompts/patcher{suffix}.en.md"),
@@ -172,7 +176,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         display::wisp_note(&handoff_note(
             config.workflow.patcher.as_str(),
             config.workflow.reviewer.as_str(),
-            "review",
+            &display_role_label("review", args.execute_agents),
             &args.lang,
         ));
 
@@ -183,6 +187,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         } else {
             "review".to_string()
         };
+        let review_display_role = display_role_label(&review_role, args.execute_agents);
         let review_prompt = build_review_prompt(&normalized_task_en, &args.task);
         let review_output = run_workflow_step(
             &config,
@@ -191,6 +196,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
             &cwd,
             config.workflow.reviewer.as_str(),
             &review_role,
+            &review_display_role,
             step,
             total_steps,
             &format!("prompts/reviewer{suffix}.en.md"),
@@ -256,12 +262,13 @@ pub fn summon(args: SummonArgs) -> Result<()> {
     display::wisp_note(&handoff_note(
         config.workflow.reviewer.as_str(),
         config.workflow.shipper.as_str(),
-        "ship",
+        &display_role_label("ship", args.execute_agents),
         &args.lang,
     ));
 
     step += 1;
     let ship_prompt = build_ship_prompt(&normalized_task_en, &args.task);
+    let ship_display_role = display_role_label("ship", args.execute_agents);
     run_workflow_step(
         &config,
         &session,
@@ -269,6 +276,7 @@ pub fn summon(args: SummonArgs) -> Result<()> {
         &cwd,
         config.workflow.shipper.as_str(),
         "ship",
+        &ship_display_role,
         step,
         total_steps,
         "prompts/shipper.en.md",
@@ -403,7 +411,25 @@ pub fn run_single_agent(args: SingleAgentArgs) -> Result<()> {
     write_step_diffs(&session, "direct", &before_step, &after_step)?;
 
     match handle_policy_violations(&violations, &config, &args.lang, &args.agent, "direct")? {
-        true => display::agent_end(&args.agent, output.status == 0),
+        true => {
+            let succeeded = output.status == 0 || !args.execute_agents;
+            display::agent_end(&args.agent, succeeded);
+            if args.execute_agents && output.status != 0 {
+                bail!(msg(
+                    &args.lang,
+                    &format!(
+                        "{} failed with exit code {}.",
+                        display::agent_display(&args.agent),
+                        output.status
+                    ),
+                    &format!(
+                        "{}이(가) 종료 코드 {}로 실패했습니다.",
+                        display::agent_display(&args.agent),
+                        output.status
+                    ),
+                ));
+            }
+        }
         false => {
             display::agent_end(&args.agent, false);
             bail!(format_policy_violation_error(
@@ -438,6 +464,7 @@ fn run_workflow_step(
     cwd: &std::path::Path,
     agent: &str,
     role: &str,
+    display_role: &str,
     step_num: usize,
     total_steps: usize,
     prompt_file: &str,
@@ -447,7 +474,7 @@ fn run_workflow_step(
 ) -> Result<AgentOutput> {
     session.write(prompt_file, prompt)?;
 
-    display::agent_start(agent, role, step_num, total_steps);
+    display::agent_start(agent, display_role, step_num, total_steps);
     let cfg = config
         .agents
         .get(agent)
@@ -516,7 +543,25 @@ fn run_workflow_step(
     write_step_diffs(session, role, &before_step, &after_step)?;
 
     match handle_policy_violations(&violations, config, &args.lang, agent, role)? {
-        true => display::agent_end(agent, output.status == 0),
+        true => {
+            let succeeded = output.status == 0 || !args.execute_agents;
+            display::agent_end(agent, succeeded);
+            if args.execute_agents && output.status != 0 {
+                bail!(msg(
+                    &args.lang,
+                    &format!(
+                        "{} ({role}) failed with exit code {}.",
+                        display::agent_display(agent),
+                        output.status
+                    ),
+                    &format!(
+                        "{} ({role})이(가) 종료 코드 {}로 실패했습니다.",
+                        display::agent_display(agent),
+                        output.status
+                    ),
+                ));
+            }
+        }
         false => {
             display::agent_end(agent, false);
             bail!(format_policy_violation_error(
@@ -881,6 +926,31 @@ fn handoff_note(from: &str, to: &str, role: &str, lang: &Language) -> String {
     }
 }
 
+fn display_role_label(role: &str, execute_agents: bool) -> String {
+    if execute_agents {
+        return role.to_string();
+    }
+
+    let suffix = role
+        .find('[')
+        .map(|idx| format!(" {}", role[idx..].trim()))
+        .unwrap_or_default();
+
+    let base = if role.starts_with("implement") {
+        "task analysis"
+    } else if role.starts_with("patch") {
+        "change preview"
+    } else if role.starts_with("review") {
+        "review check"
+    } else if role.starts_with("ship") {
+        "summary"
+    } else {
+        role
+    };
+
+    format!("{base}{suffix}")
+}
+
 // ── Task normalization ─────────────────────────────────────────────────────────
 
 fn normalize_task_en(task: &str, lang: &Language) -> String {
@@ -1099,7 +1169,9 @@ fn finalize_workflow_summary(
             ## Security Note\n\n\
             Wisp is not a security sandbox. Agents run with your full user permissions. \
             The policy layer blocks specific commands and paths configured in wisp.toml, \
-            but cannot prevent all unsafe actions. Review agent output before approving commits.\n",
+            but cannot prevent all unsafe actions. Review agent output before approving commits.\n\n\
+            Session logs in `.wisp/sessions/` contain task text, prompts, instructions, \
+            and git diffs verbatim. Review and delete sessions that contain sensitive data.\n",
             session.path().display(),
             instructions.files.len(),
             instructions.total_bytes,
@@ -1137,7 +1209,9 @@ fn finalize_single_agent_summary(
             - Session: {}\n\
             - Instructions loaded: {} ({} bytes{})\n\n\
             ## Security Note\n\n\
-            Wisp is not a security sandbox. Agents run with your full user permissions.\n",
+            Wisp is not a security sandbox. Agents run with your full user permissions.\n\
+            Session logs in `.wisp/sessions/` contain task text, prompts, and git diffs verbatim. \
+            Review and delete sessions that contain sensitive data.\n",
             session.path().display(),
             instructions.files.len(),
             instructions.total_bytes,

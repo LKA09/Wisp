@@ -20,5 +20,5 @@ current platform. If the binary is unavailable, build from source in the repo.
 
 ```sh
 wisp init
-wisp run
+wisp summon "<your task>"
 ```
