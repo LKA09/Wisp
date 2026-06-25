@@ -32,9 +32,7 @@ pub fn is_protected_path(path: &str, config: &Config) -> bool {
     let normalized = normalize_path(path);
     config.policy.protected_paths.iter().any(|candidate| {
         let candidate = normalize_path(candidate);
-        normalized == candidate
-            || normalized.starts_with(&(candidate.clone() + "/"))
-            || normalized.contains(&candidate)
+        normalized == candidate || normalized.starts_with(&(candidate.clone() + "/"))
     }) || matches_sensitive_path(&normalized)
 }
 

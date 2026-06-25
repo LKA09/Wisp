@@ -132,7 +132,7 @@ impl App {
             return;
         }
         // Skip redundant workflow title
-        if t.contains("implement · patch · review · ship") {
+        if t.contains("implement · patch · review · ship") || t.contains("preview workflow") {
             return;
         }
         // Skip session path (too technical for TUI)
@@ -449,7 +449,18 @@ fn on_submit(input: String, app: &mut App) -> anyhow::Result<()> {
         },
         InteractiveAction::EnterPasteMode => {
             app.push(format!("  > {input}"), LAVENDER);
-            app.push("  Type your task in the input bar and press Enter.", DIM);
+            app.push(
+                "  Multi-line tasks: type your task, then end with a trailing command:",
+                DIM,
+            );
+            app.push("    <task text>  /run      — execute workflow", DIM);
+            app.push("    <task text>  /dry      — dry-run preview", DIM);
+            app.push("    <task text>  /claude   — run Claude directly", DIM);
+            app.push("    <task text>  /codex    — run Codex directly", DIM);
+            app.push(
+                "  Or type a task alone and press Enter (respects current mode).",
+                DIM,
+            );
         }
         InteractiveAction::ModeAction { arg } => {
             app.push(format!("  > {input}"), LAVENDER);

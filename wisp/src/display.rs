@@ -163,10 +163,15 @@ pub fn agent_display(name: &str) -> String {
 
 pub fn header(task: &str, branch: &str, mode: &str, instruction_files: usize) {
     let rule = heavy_rule();
+    let subtitle = if mode == "dry-run" {
+        "preview workflow"
+    } else {
+        "implement · patch · review · ship"
+    };
 
     emit(&rule);
     emit(&format!(
-        "  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp{RESET}  {GRAY}—{RESET}  implement · patch · review · ship"
+        "  {ACCENT}✦{RESET}  {BOLD}{WHITE}Wisp{RESET}  {GRAY}—{RESET}  {subtitle}"
     ));
     emit(&rule);
     emit("");
@@ -412,7 +417,7 @@ pub fn mode_status(execute_agents: bool) {
              {GRAY}— bare tasks invoke agents{RESET}"
         ));
         emit(&format!(
-            "  {GRAY}Use {WHITE}/mode dry-run{GRAY} to switch to preview-only.{RESET}"
+            "  {GRAY}Use {WHITE}wisp mode dry-run{GRAY} or {WHITE}/mode dry-run{GRAY} to switch to preview-only.{RESET}"
         ));
     } else {
         emit(&format!(
@@ -420,7 +425,7 @@ pub fn mode_status(execute_agents: bool) {
              {GRAY}— bare tasks show a preview only (default){RESET}"
         ));
         emit(&format!(
-            "  {GRAY}Use {WHITE}/mode execute{GRAY} to invoke agents for bare tasks.{RESET}"
+            "  {GRAY}Use {WHITE}wisp mode execute{GRAY} or {WHITE}/mode execute{GRAY} to invoke agents for bare tasks.{RESET}"
         ));
     }
     emit("");

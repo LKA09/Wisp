@@ -39,6 +39,8 @@ const arch = ARCH_MAP[process.arch];
 
 if (!plat || !arch) {
   warn(`Unsupported platform: ${process.platform}-${process.arch}`);
+  warn('No binary will be installed — the `wisp` command will not be runnable on this platform.');
+  warn('Build from source: https://github.com/LKA09/Wisp#build-from-source');
   process.exit(0);
 }
 
@@ -61,7 +63,16 @@ get(downloadUrl, (err, data) => {
     warn(`Expected release asset: ${assetName}`);
     warn(`Release URL checked: ${downloadUrl}`);
     warn('');
-    warn('The GitHub Release asset may be missing for this version/platform.');
+    const isHttpError = err.message && /^HTTP \d+/.test(err.message);
+    const is404 = err.message && err.message.includes('HTTP 404');
+    if (is404) {
+      warn('The GitHub Release asset may be missing for this version/platform.');
+    } else if (isHttpError) {
+      warn(`HTTP error during download. The release asset may be missing or the release URL is incorrect.`);
+    } else {
+      warn('This appears to be a network or access error (not a missing release asset).');
+      warn('Check your internet connection, firewall, or proxy settings and retry.');
+    }
     warn('');
     warn('Build from source (Windows PowerShell):');
     warn('  cd wisp');
