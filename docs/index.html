@@ -1,0 +1,1707 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wisp — Local Coding Agent Orchestrator</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+    <meta
+      name="description"
+      content="A local coding agent orchestrator. Claude implements. Codex ships. You stay in control."
+    />
+    <style>
+      :root {
+        --bg: #0a0a0f;
+        --bg2: #111118;
+        --bg3: #1a1a24;
+        --border: #2a2a38;
+        --accent: #a78bfa;
+        --accent2: #7c3aed;
+        --accent-dim: #6d28d9;
+        --text: #e2e8f0;
+        --text-dim: #94a3b8;
+        --text-dimmer: #64748b;
+        --green: #4ade80;
+        --yellow: #fbbf24;
+        --red: #f87171;
+        --text-heading: #ffffff;
+        --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+        --sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        --nav-bg: rgba(10, 10, 15, 0.85);
+      }
+
+      body.light {
+        --bg: #f8f7ff;
+        --bg2: #ffffff;
+        --bg3: #f0eeff;
+        --border: #ddd8f8;
+        --accent: #7c3aed;
+        --accent2: #6d28d9;
+        --accent-dim: #5b21b6;
+        --text: #1e1b2e;
+        --text-dim: #4b4570;
+        --text-dimmer: #8b85a7;
+        --green: #16a34a;
+        --yellow: #d97706;
+        --red: #dc2626;
+        --text-heading: #0d0d14;
+        --nav-bg: rgba(248, 247, 255, 0.88);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-weight: 500;
+        font-size: 16px;
+        line-height: 1.7;
+        min-height: 100vh;
+      }
+
+      /* ── Nav ── */
+      nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 2rem;
+        height: 56px;
+        background: var(--nav-bg);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .nav-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-family: var(--mono);
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text);
+        text-decoration: none;
+      }
+
+      .nav-brand .star {
+        color: var(--accent);
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        list-style: none;
+      }
+
+      .nav-links a {
+        color: var(--text-dim);
+        text-decoration: none;
+        font-size: 0.875rem;
+        transition: color 0.2s;
+      }
+
+      .nav-links a:hover {
+        color: var(--accent);
+      }
+
+      .lang-btn,
+      .theme-btn {
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        color: var(--text-dim);
+        padding: 0.25rem 0.75rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-family: var(--mono);
+        cursor: pointer;
+        transition: all 0.2s;
+        letter-spacing: 0.05em;
+      }
+
+      .lang-btn:hover,
+      .theme-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .theme-btn {
+        font-size: 1rem;
+        padding: 0.2rem 0.5rem;
+      }
+
+      /* ── Layout ── */
+      main {
+        padding-top: 56px;
+      }
+
+      section {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 5rem 2rem;
+      }
+
+      section + section {
+        padding-top: 0;
+      }
+
+      /* ── Hero ── */
+      .hero {
+        text-align: center;
+        padding: 7rem 2rem 5rem;
+      }
+
+      .hero-logo {
+        font-size: 3rem;
+        color: var(--accent);
+        margin-bottom: 1rem;
+        display: block;
+        line-height: 1;
+      }
+
+      h1 {
+        font-family: var(--mono);
+        font-size: clamp(2rem, 5vw, 3rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text-heading);
+        margin-bottom: 1rem;
+      }
+
+      .hero-sub {
+        font-size: 1.15rem;
+        color: var(--text-dim);
+        max-width: 540px;
+        margin: 0 auto 2rem;
+      }
+
+      .hero-sub strong {
+        color: var(--text);
+      }
+
+      .badges {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-bottom: 2.5rem;
+      }
+
+      .badges img {
+        height: 20px;
+      }
+
+      .btn-row {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.6rem 1.4rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        border: none;
+        transition: all 0.2s;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #0a0a0f;
+      }
+
+      .btn-primary:hover {
+        background: #c4b5fd;
+      }
+
+      .btn-secondary {
+        background: var(--bg3);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+
+      .btn-secondary:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      /* ── Pipeline diagram ── */
+      .pipeline {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.5rem 2rem;
+        font-family: var(--mono);
+        font-size: 0.9rem;
+        color: var(--text-dim);
+        margin: 3rem auto;
+        max-width: 600px;
+        text-align: left;
+      }
+
+      .pipeline .step {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        line-height: 2;
+      }
+      .pipeline .step-num {
+        color: var(--text-dimmer);
+        font-size: 0.78rem;
+      }
+      .pipeline .agent-claude {
+        color: #93c5fd;
+      }
+      .pipeline .agent-codex {
+        color: #6ee7b7;
+      }
+      .pipeline .role {
+        color: var(--accent);
+      }
+      .pipeline .desc {
+        color: var(--text-dim);
+      }
+      .pipeline .bracket-top {
+        color: var(--text-dimmer);
+      }
+
+      /* ── Section headers ── */
+      h2 {
+        font-family: var(--mono);
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text-heading);
+        margin-bottom: 0.4rem;
+      }
+
+      .section-label {
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        color: var(--accent);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        margin-bottom: 0.5rem;
+      }
+
+      h3 {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--text);
+        margin: 2rem 0 0.75rem;
+      }
+
+      p {
+        color: var(--text-dim);
+        margin-bottom: 1rem;
+      }
+
+      /* ── Code blocks ── */
+      .code-block {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 1.25rem 0;
+      }
+
+      .code-block-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.5rem 1rem;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg3);
+      }
+
+      .code-block-lang {
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        color: var(--text-dimmer);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .copy-btn {
+        background: none;
+        border: none;
+        color: var(--text-dimmer);
+        font-size: 0.75rem;
+        cursor: pointer;
+        font-family: var(--mono);
+        padding: 0.1rem 0.4rem;
+        border-radius: 4px;
+        transition: color 0.2s;
+      }
+
+      .copy-btn:hover {
+        color: var(--accent);
+      }
+
+      pre {
+        padding: 1.25rem 1.5rem;
+        overflow-x: auto;
+        font-family: var(--mono);
+        font-size: 0.875rem;
+        line-height: 1.7;
+        color: var(--text);
+      }
+
+      pre .cm {
+        color: var(--text-dimmer);
+      }
+      pre .kw {
+        color: var(--accent);
+      }
+      pre .st {
+        color: #fbbf24;
+      }
+      pre .fl {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      code {
+        font-family: var(--mono);
+        font-size: 0.85em;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        padding: 0.15em 0.45em;
+        border-radius: 4px;
+        color: var(--accent);
+      }
+
+      /* ── Why table ── */
+      .why-grid {
+        display: grid;
+        gap: 0.75rem;
+        margin: 1.5rem 0;
+      }
+
+      .why-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        transition: border-color 0.2s;
+      }
+
+      .why-row:hover {
+        border-color: var(--accent);
+      }
+
+      .why-problem {
+        color: var(--text-dim);
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .why-problem::before {
+        content: "✗";
+        color: var(--red);
+        font-size: 0.8rem;
+        flex-shrink: 0;
+      }
+
+      .why-answer {
+        color: var(--text);
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .why-answer::before {
+        content: "✓";
+        color: var(--green);
+        font-size: 0.8rem;
+        flex-shrink: 0;
+      }
+
+      /* ── Feature cards ── */
+      .card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 1rem;
+        margin: 1.5rem 0;
+      }
+
+      .card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1.25rem;
+        transition: border-color 0.2s;
+      }
+
+      .card:hover {
+        border-color: var(--accent);
+      }
+
+      .card-icon {
+        font-size: 1.2rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .card h4 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 0.4rem;
+      }
+
+      .card p {
+        font-size: 0.82rem;
+        color: var(--text-dim);
+        margin: 0;
+      }
+
+      /* ── Table ── */
+      .table-wrap {
+        overflow-x: auto;
+        margin: 1.25rem 0;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+
+      th {
+        background: var(--bg3);
+        color: var(--text-dim);
+        font-weight: 600;
+        font-size: 0.78rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        text-align: left;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--border);
+      }
+
+      td {
+        padding: 0.7rem 1rem;
+        color: var(--text-dim);
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+      tr:hover td {
+        background: var(--bg3);
+      }
+
+      td code {
+        font-size: 0.8rem;
+      }
+      td strong {
+        color: var(--text);
+      }
+
+      /* ── Safety grid ── */
+      .safety-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 0.75rem;
+        margin: 1.5rem 0;
+      }
+
+      .safety-item {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+      }
+
+      .safety-item .safety-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 0.3rem;
+      }
+
+      .safety-item .safety-title .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+        flex-shrink: 0;
+      }
+
+      .safety-item p {
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        margin: 0;
+      }
+
+      /* ── Note box ── */
+      .note {
+        background: rgba(167, 139, 250, 0.08);
+        border: 1px solid rgba(167, 139, 250, 0.25);
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        font-size: 0.875rem;
+        color: var(--text-dim);
+        margin: 1.25rem 0;
+      }
+
+      .note strong {
+        color: var(--accent);
+      }
+
+      /* ── Divider ── */
+      .divider {
+        max-width: 860px;
+        margin: 0 auto;
+        border: none;
+        border-top: 1px solid var(--border);
+      }
+
+      /* ── Footer ── */
+      footer {
+        text-align: center;
+        padding: 3rem 2rem;
+        color: var(--text-dimmer);
+        font-size: 0.85rem;
+      }
+
+      footer a {
+        color: var(--text-dim);
+        text-decoration: none;
+      }
+
+      footer a:hover {
+        color: var(--accent);
+      }
+
+      /* ── i18n ── */
+      [data-ko] {
+        display: none;
+      }
+      body.lang-ko [data-en] {
+        display: none;
+      }
+      body.lang-ko [data-ko] {
+        display: revert;
+      }
+      body.lang-ko .lang-btn {
+      }
+
+      /* ── Responsive ── */
+      @media (max-width: 640px) {
+        .nav-links li:not(:last-child) {
+          display: none;
+        }
+        .why-row {
+          grid-template-columns: 1fr;
+          gap: 0.5rem;
+        }
+        h1 {
+          font-size: 1.8rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ── Nav ── -->
+    <nav>
+      <a class="nav-brand" href="#"> <span class="star">✦</span> Wisp </a>
+      <ul class="nav-links">
+        <li>
+          <a href="#quickstart" data-en>Quick Start</a
+          ><a href="#quickstart" data-ko>빠른 시작</a>
+        </li>
+        <li>
+          <a href="#how" data-en>How It Works</a
+          ><a href="#how" data-ko>동작 방식</a>
+        </li>
+        <li>
+          <a href="#install" data-en>Install</a
+          ><a href="#install" data-ko>설치</a>
+        </li>
+        <li>
+          <a href="#safety" data-en>Safety</a
+          ><a href="#safety" data-ko>안전 모델</a>
+        </li>
+        <li>
+          <a href="https://github.com/LKA09/Wisp" target="_blank">GitHub ↗</a>
+        </li>
+        <li>
+          <button
+            class="theme-btn"
+            onclick="toggleTheme()"
+            id="themeBtn"
+            title="Toggle light/dark mode"
+          >
+            ☀️
+          </button>
+        </li>
+        <li>
+          <button class="lang-btn" onclick="toggleLang()" id="langBtn">
+            한국어
+          </button>
+        </li>
+      </ul>
+    </nav>
+
+    <main>
+      <!-- ── Hero ── -->
+      <section class="hero">
+        <span class="hero-logo">✦</span>
+        <h1>Wisp</h1>
+        <p class="hero-sub" data-en>
+          A <strong>local coding agent orchestrator</strong>.<br />
+          Claude implements. Codex ships. You stay in control.
+        </p>
+        <p class="hero-sub" data-ko>
+          <strong>로컬 코딩 에이전트 오케스트레이터</strong>.<br />
+          Claude가 구현하고, Codex가 배포한다. 결정권은 당신에게 있다.
+        </p>
+
+        <div class="badges">
+          <img
+            src="https://github.com/LKA09/Wisp/actions/workflows/ci.yml/badge.svg"
+            alt="CI"
+          />
+          <img
+            src="https://img.shields.io/npm/v/@lka09/wisp?color=a78bfa&label=npm"
+            alt="npm"
+          />
+          <img
+            src="https://img.shields.io/badge/license-MIT-a78bfa.svg"
+            alt="MIT"
+          />
+          <img
+            src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-a78bfa.svg"
+            alt="Platform"
+          />
+        </div>
+
+        <div class="btn-row">
+          <a class="btn btn-primary" href="#quickstart" data-en>Get Started</a>
+          <a class="btn btn-primary" href="#quickstart" data-ko>시작하기</a>
+          <a
+            class="btn btn-secondary"
+            href="https://github.com/LKA09/Wisp"
+            target="_blank"
+            >GitHub ↗</a
+          >
+          <a
+            class="btn btn-secondary"
+            href="https://www.npmjs.com/package/@lka09/wisp"
+            target="_blank"
+            >npm ↗</a
+          >
+        </div>
+
+        <div class="pipeline">
+          <div class="step">
+            <span class="bracket-top">┌─</span>
+            <span class="step-num">[1/4]</span>
+            <span class="agent-claude">Claude</span>
+            <span class="role"> implement </span>
+            <span class="desc" data-en>writes the solution</span
+            ><span class="desc" data-ko>솔루션 작성</span>
+          </div>
+          <div class="step">
+            <span class="bracket-top">&nbsp;&nbsp;&nbsp;</span>
+            <span class="step-num">[2/4]</span>
+            <span class="agent-codex">Codex &nbsp;</span>
+            <span class="role"> patch &nbsp;&nbsp;&nbsp;</span>
+            <span class="desc" data-en>reviews diff, applies fixes</span
+            ><span class="desc" data-ko>diff 검토 후 수정 적용</span>
+          </div>
+          <div class="step">
+            <span class="bracket-top">&nbsp;&nbsp;&nbsp;</span>
+            <span class="step-num">[3/4]</span>
+            <span class="agent-claude">Claude</span>
+            <span class="role"> review &nbsp;&nbsp;</span>
+            <span class="desc" data-en>APPROVED / CHANGES_REQUESTED</span
+            ><span class="desc" data-ko>APPROVED / CHANGES_REQUESTED</span>
+          </div>
+          <div class="step">
+            <span class="bracket-top">└─</span>
+            <span class="step-num">[4/4]</span>
+            <span class="agent-codex">Codex &nbsp;</span>
+            <span class="role"> ship &nbsp;&nbsp;&nbsp;&nbsp;</span>
+            <span class="desc" data-en>suggests commit message</span
+            ><span class="desc" data-ko>커밋 메시지 제안</span>
+          </div>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── Why Wisp ── -->
+      <section id="why">
+        <p class="section-label" data-en>Why Wisp</p>
+        <p class="section-label" data-ko>왜 Wisp인가</p>
+        <h2 data-en>Agents should suggest, not decide.</h2>
+        <h2 data-ko>에이전트는 제안하고, 결정은 사람이 한다.</h2>
+
+        <div class="why-grid" data-en>
+          <div class="why-row">
+            <div class="why-problem">
+              AI edits your files while you look away
+            </div>
+            <div class="why-answer">Everything is dry-run by default</div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">
+              Can't tell what the agent actually did
+            </div>
+            <div class="why-answer">
+              Full session log — prompts, diffs, timing, policy results
+            </div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">One agent makes one big messy change</div>
+            <div class="why-answer">
+              Four-role pipeline: implement → patch → review → ship
+            </div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">AI pushes commits you didn't approve</div>
+            <div class="why-answer">Hard policy block on commit and push</div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">
+              Agents ignore your project conventions
+            </div>
+            <div class="why-answer">
+              Load <code>.wisp/instructions.md</code> into every prompt
+            </div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">
+              Korean task input breaks English-only tools
+            </div>
+            <div class="why-answer">
+              Auto-detects Korean, responds in Korean
+            </div>
+          </div>
+        </div>
+
+        <div class="why-grid" data-ko>
+          <div class="why-row">
+            <div class="why-problem">
+              AI가 내가 모르는 사이에 파일을 수정한다
+            </div>
+            <div class="why-answer">
+              기본값은 dry-run — 내가 명시적으로 허용해야 변경된다
+            </div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">
+              에이전트가 실제로 뭘 했는지 알 수 없다
+            </div>
+            <div class="why-answer">
+              세션 전체 로그 — 프롬프트, diff, 실행 시간, 정책 검사 결과
+            </div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">
+              에이전트 하나가 한 번에 너무 많이 바꾼다
+            </div>
+            <div class="why-answer">4단계 파이프라인으로 각 역할을 분리</div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">에이전트가 커밋을 마음대로 올린다</div>
+            <div class="why-answer">커밋과 푸시는 정책으로 차단</div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">에이전트가 프로젝트 규칙을 무시한다</div>
+            <div class="why-answer">
+              <code>.wisp/instructions.md</code>를 모든 프롬프트에 주입
+            </div>
+          </div>
+          <div class="why-row">
+            <div class="why-problem">
+              한국어 입력이 영어 전용 툴에서 제대로 안 된다
+            </div>
+            <div class="why-answer">한국어 자동 감지, 한국어로 응답</div>
+          </div>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── Quick Start ── -->
+      <section id="quickstart">
+        <p class="section-label" data-en>Quick Start</p>
+        <p class="section-label" data-ko>빠른 시작</p>
+        <h2 data-en>Up and running in 30 seconds.</h2>
+        <h2 data-ko>30초 안에 바로 시작.</h2>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">sh</span>
+            <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          </div>
+          <pre><span class="cm" data-en># Install — binary auto-downloaded from GitHub Releases</span><span class="cm" data-ko># 설치 — GitHub Releases에서 바이너리 자동 다운로드</span>
+npm install -g @lka09/wisp
+
+<span class="cm" data-en># Initialize your project</span><span class="cm" data-ko># 프로젝트 초기화</span>
+cd your-project
+wisp init
+
+<span class="cm" data-en># Preview what agents would do — no files changed</span><span class="cm" data-ko># 에이전트가 뭘 할지 미리보기 — 파일 변경 없음</span>
+wisp summon <span class="st">"add rate limiting to the API endpoints"</span>
+
+<span class="cm" data-en># Actually run it</span><span class="cm" data-ko># 실제로 실행</span>
+wisp summon <span class="st">"add rate limiting to the API endpoints"</span> --execute-agents</pre>
+        </div>
+
+        <div class="note" data-en>
+          <strong>Prerequisite:</strong>
+          <a
+            href="https://github.com/anthropics/claude-code"
+            target="_blank"
+            style="color: var(--accent)"
+            >Claude CLI</a
+          >
+          and/or
+          <a
+            href="https://github.com/openai/codex"
+            target="_blank"
+            style="color: var(--accent)"
+            >Codex CLI</a
+          >
+          installed and authenticated. Dry-run works without them.
+        </div>
+        <div class="note" data-ko>
+          <strong>사전 조건:</strong>
+          <a
+            href="https://github.com/anthropics/claude-code"
+            target="_blank"
+            style="color: var(--accent)"
+            >Claude CLI</a
+          >
+          또는
+          <a
+            href="https://github.com/openai/codex"
+            target="_blank"
+            style="color: var(--accent)"
+            >Codex CLI</a
+          >
+          설치 및 인증 필요. dry-run은 에이전트 없이도 동작한다.
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── How It Works ── -->
+      <section id="how">
+        <p class="section-label" data-en>How It Works</p>
+        <p class="section-label" data-ko>동작 방식</p>
+        <h2 data-en>A structured 4-step pipeline.</h2>
+        <h2 data-ko>구조화된 4단계 파이프라인.</h2>
+
+        <div class="card-grid">
+          <div class="card">
+            <div class="card-icon" style="color: #93c5fd">①</div>
+            <h4>implement</h4>
+            <p data-en>
+              Claude reads your task and project instructions, writes the
+              solution.
+            </p>
+            <p data-ko>
+              Claude가 작업과 프로젝트 지시사항을 읽고 솔루션을 작성한다.
+            </p>
+          </div>
+          <div class="card">
+            <div class="card-icon" style="color: #6ee7b7">②</div>
+            <h4>patch</h4>
+            <p data-en>
+              Codex reviews the diff and applies fixes. Repeats up to
+              <code>max_review_rounds</code>.
+            </p>
+            <p data-ko>
+              Codex가 diff를 검토하고 수정 사항을 적용한다. 최대
+              <code>max_review_rounds</code>회 반복.
+            </p>
+          </div>
+          <div class="card">
+            <div class="card-icon" style="color: #93c5fd">③</div>
+            <h4>review</h4>
+            <p data-en>
+              Claude reviews the final diff and outputs <code>APPROVED</code>,
+              <code>CHANGES_REQUESTED</code>, or
+              <code>NEEDS_USER_DECISION</code>.
+            </p>
+            <p data-ko>
+              Claude가 최종 diff를 리뷰하고 <code>APPROVED</code>,
+              <code>CHANGES_REQUESTED</code>,
+              <code>NEEDS_USER_DECISION</code> 중 하나를 출력한다.
+            </p>
+          </div>
+          <div class="card">
+            <div class="card-icon" style="color: #6ee7b7">④</div>
+            <h4>ship</h4>
+            <p data-en>
+              Codex prepares a commit message suggestion. You decide whether to
+              commit.
+            </p>
+            <p data-ko>
+              Codex가 커밋 메시지 초안을 제안한다. 커밋 여부는 내가 결정한다.
+            </p>
+          </div>
+        </div>
+
+        <h3 data-en>Session audit trail</h3>
+        <h3 data-ko>세션 감사 기록</h3>
+        <p data-en>
+          Every run writes a timestamped session under
+          <code>.wisp/sessions/</code>:
+        </p>
+        <p data-ko>
+          모든 실행마다 <code>.wisp/sessions/</code> 아래에 타임스탬프
+          디렉터리가 생성된다:
+        </p>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">text</span>
+          </div>
+          <pre>.wisp/sessions/20260619-143022-p4801/
+  task.original.txt          <span class="cm" data-en>what you typed</span><span class="cm" data-ko>내가 입력한 원본 작업</span>
+  task.normalized.en.md      <span class="cm" data-en>English translation for agents</span><span class="cm" data-ko>에이전트용 영어 번역</span>
+  instructions.loaded.md     <span class="cm" data-en>all project instruction files merged</span><span class="cm" data-ko>불러온 프로젝트 지시사항 전체</span>
+  prompts/
+    implementer.en.md        <span class="cm" data-en>prompt sent to Claude</span><span class="cm" data-ko>Claude에게 보낸 프롬프트</span>
+    patcher.en.md
+    reviewer.en.md
+    shipper.en.md
+  outputs/
+    implement.out.md         <span class="cm" data-en>stdout + stderr</span><span class="cm" data-ko>stdout + stderr</span>
+    implement.meta.txt       <span class="cm" data-en>timing, exit code, git delta, policy checks</span><span class="cm" data-ko>실행 시간, 종료 코드, git 변경사항, 정책 검사</span>
+    implement.diff.*.patch   <span class="cm" data-en>git state before/after this step</span><span class="cm" data-ko>이 단계 실행 전/후 git 상태</span>
+  summary.md</pre>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── Install ── -->
+      <section id="install">
+        <p class="section-label" data-en>Installation</p>
+        <p class="section-label" data-ko>설치</p>
+        <h2 data-en>npm or build from source.</h2>
+        <h2 data-ko>npm 또는 소스 빌드.</h2>
+
+        <h3 data-en>Option 1 — npm (recommended)</h3>
+        <h3 data-ko>방법 1 — npm (권장)</h3>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">sh</span>
+            <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          </div>
+          <pre>npm install -g @lka09/wisp</pre>
+        </div>
+
+        <p data-en>
+          The postinstall script downloads the pre-built binary for your
+          platform from GitHub Releases. If the download fails, it prints exact
+          build-from-source instructions.
+        </p>
+        <p data-ko>
+          postinstall 스크립트가 GitHub Releases에서 플랫폼에 맞는 바이너리를
+          자동으로 다운로드한다. 다운로드에 실패하면 소스 빌드 방법을 정확하게
+          출력해준다.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-en>OS</th>
+                <th data-ko>OS</th>
+                <th data-en>Architecture</th>
+                <th data-ko>아키텍처</th>
+                <th data-en>Asset</th>
+                <th data-ko>릴리스 에셋</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Windows</td>
+                <td>x86_64</td>
+                <td><code>wisp-windows-x86_64.exe</code></td>
+              </tr>
+              <tr>
+                <td>Windows</td>
+                <td>ARM64</td>
+                <td><code>wisp-windows-aarch64.exe</code></td>
+              </tr>
+              <tr>
+                <td>Linux</td>
+                <td>x86_64</td>
+                <td><code>wisp-linux-x86_64</code></td>
+              </tr>
+              <tr>
+                <td>Linux</td>
+                <td>ARM64</td>
+                <td><code>wisp-linux-aarch64</code></td>
+              </tr>
+              <tr>
+                <td>macOS</td>
+                <td>x86_64 (Intel)</td>
+                <td><code>wisp-darwin-x86_64</code></td>
+              </tr>
+              <tr>
+                <td>macOS</td>
+                <td>Apple Silicon</td>
+                <td><code>wisp-darwin-aarch64</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 data-en>Option 2 — Build from source</h3>
+        <h3 data-ko>방법 2 — 소스 빌드</h3>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">sh — Linux / macOS</span>
+            <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          </div>
+          <pre>
+git clone https://github.com/LKA09/Wisp
+cd Wisp/wisp
+cargo build --release
+mkdir -p ../npm/dist
+cp target/release/wisp ../npm/dist/wisp
+cd ../npm && npm link</pre
+          >
+        </div>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">powershell — Windows</span>
+            <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          </div>
+          <pre>
+git clone https://github.com/LKA09/Wisp
+cd Wisp\wisp
+cargo build --release
+New-Item -ItemType Directory -Force -Path ..\npm\dist | Out-Null
+Copy-Item target\release\wisp.exe ..\npm\dist\wisp.exe
+cd ..\npm; npm link</pre
+          >
+        </div>
+
+        <h3 data-en>Prerequisites</h3>
+        <h3 data-ko>사전 요구사항</h3>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-en>Tool</th>
+                <th data-ko>도구</th>
+                <th data-en>When needed</th>
+                <th data-ko>필요 시점</th>
+                <th data-en>Install</th>
+                <th data-ko>설치</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Node.js ≥ 16</strong></td>
+                <td data-en>Always</td>
+                <td data-ko>항상</td>
+                <td>
+                  <a
+                    href="https://nodejs.org"
+                    target="_blank"
+                    style="color: var(--accent)"
+                    >nodejs.org</a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Git</strong></td>
+                <td data-en>Always</td>
+                <td data-ko>항상</td>
+                <td>
+                  <a
+                    href="https://git-scm.com"
+                    target="_blank"
+                    style="color: var(--accent)"
+                    >git-scm.com</a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Rust + Cargo</strong></td>
+                <td data-en>Source build only</td>
+                <td data-ko>소스 빌드 시</td>
+                <td>
+                  <a
+                    href="https://rustup.rs"
+                    target="_blank"
+                    style="color: var(--accent)"
+                    >rustup.rs</a
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Claude CLI</strong></td>
+                <td><code>--execute-agents</code></td>
+                <td><code>npm i -g @anthropic-ai/claude-code</code></td>
+              </tr>
+              <tr>
+                <td><strong>Codex CLI</strong></td>
+                <td><code>--execute-agents</code></td>
+                <td><code>npm i -g @openai/codex</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── TUI ── -->
+      <section id="tui">
+        <p class="section-label">TUI</p>
+        <h2 data-en>Interactive terminal UI.</h2>
+        <h2 data-ko>인터랙티브 터미널 UI.</h2>
+
+        <p data-en>
+          Run <code>wisp</code> with no arguments to open the full-screen
+          interactive REPL.
+        </p>
+        <p data-ko>
+          <code>wisp</code>를 인수 없이 실행하면 전체 화면 TUI가 열린다.
+        </p>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">terminal</span>
+          </div>
+          <pre
+            style="color: var(--text-dim)"
+          ><span style="color:#a78bfa">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+  <span style="color:#a78bfa">✦</span>  <span style="color:#fff;font-weight:600">Wisp</span>  <span style="color:var(--text-dimmer)">—</span>  <span data-en>implement · patch · review · ship</span><span data-ko>implement · patch · review · ship</span>
+<span style="color:#a78bfa">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>
+
+  <span data-en>Type a task and press Enter — default is dry-run preview.</span><span data-ko>작업을 입력하고 Enter를 누르세요 — 기본값은 dry-run 미리보기.</span>
+
+  › <span style="color:var(--text-dimmer)">/</span>
+  <span style="color:var(--border)">╭────────────────────────────────────────────────────╮</span>
+  <span style="color:var(--border)">│</span> <span style="color:#a78bfa">/run</span>    <span data-en>execute workflow interactively</span><span data-ko>워크플로우 실행</span>            <span style="color:var(--border)">│</span>
+  <span style="color:var(--border)">│</span> <span style="color:#a78bfa">/auto</span>   <span data-en>execute workflow (auto-approve)</span><span data-ko>워크플로우 실행 (자동 승인)</span>     <span style="color:var(--border)">│</span>
+  <span style="color:var(--border)">│</span> <span style="color:#a78bfa">/claude</span> <span data-en>run Claude directly</span><span data-ko>Claude 단독 실행</span>                    <span style="color:var(--border)">│</span>
+  <span style="color:var(--border)">│</span> <span style="color:#a78bfa">/codex</span>  <span data-en>run Codex directly</span><span data-ko>Codex 단독 실행</span>                     <span style="color:var(--border)">│</span>
+  <span style="color:var(--border)">│</span> <span style="color:#a78bfa">/paste</span>  <span data-en>enter multi-line paste mode</span><span data-ko>여러 줄 붙여넣기 모드</span>              <span style="color:var(--border)">│</span>
+  <span style="color:var(--border)">╰────────────────────────────────────────────────────╯</span></pre>
+        </div>
+
+        <div class="table-wrap" style="margin-top: 1.5rem">
+          <table>
+            <thead>
+              <tr>
+                <th data-en>Input</th>
+                <th data-ko>입력</th>
+                <th data-en>Action</th>
+                <th data-ko>동작</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>&lt;task&gt;</code></td>
+                <td data-en>Dry-run preview (no files changed)</td>
+                <td data-ko>Dry-run 미리보기 (파일 변경 없음)</td>
+              </tr>
+              <tr>
+                <td><code>/run &lt;task&gt;</code></td>
+                <td data-en>Execute full workflow interactively</td>
+                <td data-ko>전체 워크플로우 실행</td>
+              </tr>
+              <tr>
+                <td><code>/auto &lt;task&gt;</code></td>
+                <td data-en>Execute full workflow (auto-approve)</td>
+                <td data-ko>전체 워크플로우 실행 (자동 승인)</td>
+              </tr>
+              <tr>
+                <td><code>/claude &lt;task&gt;</code></td>
+                <td data-en>Run Claude as single agent</td>
+                <td data-ko>Claude 단독 에이전트 실행</td>
+              </tr>
+              <tr>
+                <td><code>/codex &lt;task&gt;</code></td>
+                <td data-en>Run Codex as single agent</td>
+                <td data-ko>Codex 단독 에이전트 실행</td>
+              </tr>
+              <tr>
+                <td><code>/paste</code></td>
+                <td data-en>Multi-line paste mode</td>
+                <td data-ko>여러 줄 붙여넣기 모드</td>
+              </tr>
+              <tr>
+                <td><code>exit</code> / <code>Ctrl+C</code></td>
+                <td data-en>Exit</td>
+                <td data-ko>종료</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── CLI Reference ── -->
+      <section id="cli">
+        <p class="section-label" data-en>CLI Reference</p>
+        <p class="section-label" data-ko>CLI 레퍼런스</p>
+        <h2 data-en>All commands at a glance.</h2>
+        <h2 data-ko>전체 명령어 한눈에.</h2>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">sh</span>
+            <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          </div>
+          <pre><span class="cm" data-en># Project setup</span><span class="cm" data-ko># 프로젝트 설정</span>
+wisp init                                     <span class="cm" data-en># create wisp.toml + .wisp/</span><span class="cm" data-ko># wisp.toml + .wisp/ 생성</span>
+wisp doctor                                   <span class="cm" data-en># check git, agents, config</span><span class="cm" data-ko># git, 에이전트, 설정 확인</span>
+
+<span class="cm" data-en># 4-step workflow: implement → patch → review → ship</span><span class="cm" data-ko># 4단계 워크플로우: implement → patch → review → ship</span>
+wisp summon <span class="st">"&lt;task&gt;"</span>                         <span class="cm" data-en># dry-run preview</span><span class="cm" data-ko># dry-run 미리보기</span>
+wisp summon <span class="st">"&lt;task&gt;"</span> --execute-agents          <span class="cm" data-en># execute</span><span class="cm" data-ko># 실행</span>
+wisp summon <span class="st">"&lt;task&gt;"</span> --execute-agents --allow-dirty
+wisp summon <span class="st">"&lt;task&gt;"</span> --execute-agents --permission auto
+
+<span class="cm" data-en># Single agent</span><span class="cm" data-ko># 단일 에이전트</span>
+wisp ask claude <span class="st">"&lt;task&gt;"</span>                     <span class="cm" data-en># dry-run</span><span class="cm" data-ko># dry-run</span>
+wisp ask claude <span class="st">"&lt;task&gt;"</span> --execute-agents     <span class="cm" data-en># execute</span><span class="cm" data-ko># 실행</span>
+wisp ask codex  <span class="st">"&lt;task&gt;"</span> --permission auto
+
+<span class="cm" data-en># Info</span><span class="cm" data-ko># 정보</span>
+wisp --help
+wisp --version</pre>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-en>Flag</th>
+                <th data-ko>플래그</th>
+                <th data-en>Default</th>
+                <th data-ko>기본값</th>
+                <th data-en>Description</th>
+                <th data-ko>설명</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>--execute-agents</code></td>
+                <td data-en>off</td>
+                <td data-ko>꺼짐</td>
+                <td data-en>Actually invoke agent CLIs</td>
+                <td data-ko>에이전트 CLI 실제 실행</td>
+              </tr>
+              <tr>
+                <td><code>--allow-dirty</code></td>
+                <td data-en>off</td>
+                <td data-ko>꺼짐</td>
+                <td data-en>Skip uncommitted-changes check</td>
+                <td data-ko>커밋되지 않은 변경사항 허용</td>
+              </tr>
+              <tr>
+                <td><code>--permission interactive</code></td>
+                <td>✓</td>
+                <td data-en>Agent prompts user for approval</td>
+                <td data-ko>에이전트가 사용자에게 승인 요청</td>
+              </tr>
+              <tr>
+                <td><code>--permission auto</code></td>
+                <td></td>
+                <td data-en>Pass auto-approve flags to agent</td>
+                <td data-ko>자동 승인 플래그 전달</td>
+              </tr>
+              <tr>
+                <td><code>--permission skip</code></td>
+                <td></td>
+                <td data-en>Skip permission-gated steps</td>
+                <td data-ko>권한 필요 단계 건너뜀</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── Safety ── -->
+      <section id="safety">
+        <p class="section-label" data-en>Safety Model</p>
+        <p class="section-label" data-ko>안전 모델</p>
+        <h2 data-en>Built-in guardrails, not an afterthought.</h2>
+        <h2 data-ko>처음부터 설계된 안전장치.</h2>
+
+        <div class="safety-grid" data-en>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              No changes without consent
+            </div>
+            <p>
+              Dry-run is the default. <code>--execute-agents</code> must be
+              explicit.
+            </p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              Protected branches
+            </div>
+            <p>
+              Execution blocked on <code>main</code>,
+              <code>master</code> (configurable).
+            </p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              Dirty tree protection
+            </div>
+            <p>Blocked unless <code>--allow-dirty</code> is set.</p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              No surprise commits
+            </div>
+            <p>Agents are instructed never to <code>git commit</code>.</p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              No surprise pushes
+            </div>
+            <p>
+              <code>push</code> approval is <code>deny</code> by default in
+              policy.
+            </p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              Protected files
+            </div>
+            <p>
+              <code>deny_commands</code> and <code>protected_paths</code> in
+              <code>wisp.toml</code>.
+            </p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              Dependency changes flagged
+            </div>
+            <p><code>add_dependency</code> triggers an approval gate.</p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              Full audit trail
+            </div>
+            <p>Every session logged to <code>.wisp/sessions/</code>.</p>
+          </div>
+        </div>
+
+        <div class="safety-grid" data-ko>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              동의 없이 변경 없음
+            </div>
+            <p>
+              dry-run이 기본값. <code>--execute-agents</code>는 명시적으로
+              설정해야 한다.
+            </p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              protected 브랜치 보호
+            </div>
+            <p>
+              <code>main</code>, <code>master</code>에서 실행 차단 (설정 가능).
+            </p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              dirty tree 보호
+            </div>
+            <p><code>--allow-dirty</code> 없으면 차단.</p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              깜짝 커밋 없음
+            </div>
+            <p>에이전트는 <code>git commit</code> 금지 지시를 받는다.</p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              깜짝 푸시 없음
+            </div>
+            <p>정책에서 <code>push</code>의 기본값은 <code>deny</code>.</p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              보호된 파일 안전
+            </div>
+            <p>
+              <code>deny_commands</code>와 <code>protected_paths</code>로 차단.
+            </p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              의존성 변경 알림
+            </div>
+            <p><code>add_dependency</code>는 승인 게이트를 통과해야 한다.</p>
+          </div>
+          <div class="safety-item">
+            <div class="safety-title">
+              <div class="dot"></div>
+              완전한 감사 기록
+            </div>
+            <p>모든 세션이 <code>.wisp/sessions/</code>에 기록된다.</p>
+          </div>
+        </div>
+
+        <div class="note" data-en>
+          <strong>Note:</strong> Wisp is not a security sandbox. Agents run with
+          your full user permissions. The policy layer blocks specific commands
+          and paths, but cannot prevent every possible unsafe action. Always
+          review agent output before approving commits.
+        </div>
+        <div class="note" data-ko>
+          <strong>주의:</strong> Wisp는 보안 샌드박스가 아니다. 에이전트는 내
+          사용자 권한으로 실행된다. 정책 레이어가 특정 명령어와 경로를
+          차단하지만 모든 위험한 동작을 막을 수는 없다. 커밋을 승인하기 전에
+          에이전트 출력을 반드시 검토하자.
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── Config ── -->
+      <section id="config">
+        <p class="section-label" data-en>Configuration</p>
+        <p class="section-label" data-ko>설정</p>
+        <h2 data-en>
+          Fully customizable via
+          <code style="font-size: 1.3rem">wisp.toml</code>.
+        </h2>
+        <h2 data-ko>
+          <code style="font-size: 1.3rem">wisp.toml</code>로 전부 설정.
+        </h2>
+
+        <p data-en>
+          <code>wisp init</code> creates <code>wisp.toml</code> in your project
+          root. Edit it to customize agents, workflow, and policy.
+        </p>
+        <p data-ko>
+          <code>wisp init</code>이 프로젝트 루트에 <code>wisp.toml</code>을
+          자동으로 생성한다.
+        </p>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang">toml — wisp.toml</span>
+            <button class="copy-btn" onclick="copyCode(this)">copy</button>
+          </div>
+          <pre><span class="cm">[language]</span>
+ui       = <span class="st">"auto"</span>   <span class="cm" data-en># auto-detects Korean input</span><span class="cm" data-ko># 한국어 입력 자동 감지</span>
+fallback = <span class="st">"en"</span>
+
+<span class="cm">[agents.claude]</span>
+cmd  = <span class="st">"claude"</span>
+args = [<span class="st">"-p"</span>, <span class="st">"{prompt}"</span>]
+
+<span class="cm">[agents.codex]</span>
+cmd  = <span class="st">"codex"</span>
+args = [<span class="st">"exec"</span>, <span class="st">"-s"</span>, <span class="st">"workspace-write"</span>, <span class="st">"{prompt}"</span>]
+
+<span class="cm">[workflow]</span>
+implementer       = <span class="st">"claude"</span>
+patcher           = <span class="st">"codex"</span>
+reviewer          = <span class="st">"claude"</span>
+shipper           = <span class="st">"codex"</span>
+max_review_rounds = <span class="fl">2</span>
+
+<span class="cm">[approval]</span>
+push                  = <span class="st">"deny"</span>  <span class="cm" data-en># always block</span><span class="cm" data-ko># 항상 차단</span>
+commit                = <span class="st">"ask"</span>
+add_dependency        = <span class="st">"ask"</span>
+delete_file           = <span class="st">"ask"</span>
+modify_protected_file = <span class="st">"deny"</span>
+
+<span class="cm">[policy]</span>
+protected_branches = [<span class="st">"main"</span>, <span class="st">"master"</span>]
+protected_paths    = [<span class="st">".env"</span>, <span class="st">".git"</span>, <span class="st">"credentials.json"</span>]
+deny_commands      = [<span class="st">"git push --force"</span>, <span class="st">"rm -rf /"</span>]
+
+<span class="cm">[instructions]</span>
+files = [<span class="st">".wisp/instructions.md"</span>, <span class="st">"AGENTS.md"</span>, <span class="st">"CLAUDE.md"</span>]</pre>
+        </div>
+
+        <h3 data-en>Project instructions</h3>
+        <h3 data-ko>프로젝트 지시사항</h3>
+        <p data-en>
+          Create <code>.wisp/instructions.md</code> to inject project context
+          into every agent prompt:
+        </p>
+        <p data-ko>
+          <code>.wisp/instructions.md</code>를 만들면 모든 에이전트 프롬프트에
+          프로젝트 맥락이 자동으로 주입된다:
+        </p>
+
+        <div class="code-block">
+          <div class="code-block-header">
+            <span class="code-block-lang"
+              >markdown — .wisp/instructions.md</span
+            >
+          </div>
+          <pre data-en>
+# Project Instructions
+
+- TypeScript + React 18. Use functional components and hooks only.
+- Run `npm test` before considering any task complete.
+- Never modify files under `src/generated/`.
+- Commit messages must follow Conventional Commits.</pre
+          >
+          <pre data-ko>
+# 프로젝트 지시사항
+
+- TypeScript + React 18 프로젝트다. 함수형 컴포넌트와 훅만 사용한다.
+- 작업 완료 전 반드시 `npm test`를 실행한다.
+- `src/generated/` 안의 파일은 수정하지 않는다.
+- 커밋 메시지는 Conventional Commits 형식을 따른다.</pre
+          >
+        </div>
+      </section>
+
+      <hr class="divider" />
+
+      <!-- ── Footer ── -->
+      <footer>
+        <p style="margin-bottom: 0.5rem">
+          <span style="color: var(--accent)">✦</span>
+          <strong style="color: var(--text)">Wisp</strong>
+        </p>
+        <p>
+          MIT &copy;
+          <a href="https://github.com/LKA09" target="_blank">LKA09</a>
+          &nbsp;·&nbsp;
+          <a href="https://github.com/LKA09/Wisp" target="_blank">GitHub</a>
+          &nbsp;·&nbsp;
+          <a href="https://www.npmjs.com/package/@lka09/wisp" target="_blank"
+            >npm</a
+          >
+        </p>
+      </footer>
+    </main>
+
+    <script>
+      // Theme toggle
+      let theme = localStorage.getItem("wisp-theme") || "dark";
+
+      function applyTheme() {
+        if (theme === "light") {
+          document.body.classList.add("light");
+          document.getElementById("themeBtn").textContent = "🌙";
+        } else {
+          document.body.classList.remove("light");
+          document.getElementById("themeBtn").textContent = "☀️";
+        }
+      }
+
+      function toggleTheme() {
+        theme = theme === "dark" ? "light" : "dark";
+        localStorage.setItem("wisp-theme", theme);
+        applyTheme();
+      }
+
+      applyTheme();
+
+      // Language toggle
+      let lang = localStorage.getItem("wisp-lang") || "en";
+
+      function applyLang() {
+        if (lang === "ko") {
+          document.body.classList.add("lang-ko");
+          document.getElementById("langBtn").textContent = "English";
+          document.documentElement.lang = "ko";
+        } else {
+          document.body.classList.remove("lang-ko");
+          document.getElementById("langBtn").textContent = "한국어";
+          document.documentElement.lang = "en";
+        }
+      }
+
+      function toggleLang() {
+        lang = lang === "en" ? "ko" : "en";
+        localStorage.setItem("wisp-lang", lang);
+        applyLang();
+      }
+
+      applyLang();
+
+      // Copy code
+      function copyCode(btn) {
+        const pre = btn.closest(".code-block").querySelector("pre");
+        const text = pre.innerText;
+        navigator.clipboard.writeText(text).then(() => {
+          btn.textContent = "copied!";
+          setTimeout(() => {
+            btn.textContent = "copy";
+          }, 1800);
+        });
+      }
+    </script>
+  </body>
+</html>
